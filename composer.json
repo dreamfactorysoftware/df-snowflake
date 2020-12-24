@@ -1,0 +1,49 @@
+{
+  "name":        "dreamfactory/df-skeleton",
+  "description": "DreamFactory(tm) Skeleton Code",
+  "homepage":    "https://www.dreamfactory.com/",
+  "keywords":    [
+    "dreamfactory",
+    "skeleton",
+    "connector"
+  ],
+  "license":     [
+    "Apache-2.0"
+  ],
+  "authors":     [
+    {
+      "name":  "Yaroslav Mokhurenko",
+      "email": "yaroslavm@softwareplanet.com"
+    }
+  ],
+  "support":     {
+    "email":  "dspsupport@dreamfactory.com",
+    "source": "https://github.com/dreamfactorysoftware/df-skeleton",
+    "issues": "https://github.com/dreamfactorysoftware/df-skeleton/issues",
+    "wiki":   "https://wiki.dreamfactory.com"
+  },
+  "minimum-stability": "dev",
+  "prefer-stable": true,
+  "require":     {
+    "dreamfactory/df-core":   "~0.15.3",
+    "dreamfactory/df-system": "~0.2.2"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "@stable"
+  },
+  "autoload":    {
+    "psr-4": {
+      "DreamFactory\\Core\\Skeleton\\": "src/"
+    }
+  },
+  "extra":       {
+    "branch-alias": {
+      "dev-develop": "0.1.x-dev"
+    },
+    "laravel": {
+      "providers": [
+        "DreamFactory\\Core\\Skeleton\\ServiceProvider"
+      ]
+    }
+  }
+}
