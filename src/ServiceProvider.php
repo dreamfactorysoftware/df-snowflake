@@ -1,13 +1,36 @@
 <?php
 namespace DreamFactory\Core\Snowflake;
 
+use DreamFactory\Core\Components\DbSchemaExtensions;
+use DreamFactory\Core\Enums\LicenseLevel;
+use DreamFactory\Core\Services\ServiceManager;
+use DreamFactory\Core\Services\ServiceType;
+use DreamFactory\Core\Snowflake\Database\Connectors\SnowflakeConnector;
+use DreamFactory\Core\Snowflake\Database\Schema\SnowflakeSchema;
+use DreamFactory\Core\Snowflake\Database\SnowflakeConnection;
 use DreamFactory\Core\Snowflake\Models\SnowflakeDbConfig;
 use DreamFactory\Core\Snowflake\Services\SnowflakeDb;
+use Illuminate\Database\DatabaseManager;
 
 class ServiceProvider extends \Illuminate\Support\ServiceProvider
 {
     public function register()
     {
+
+        $this->app->resolving('db.schema', function (DbSchemaExtensions $db){
+            $db->extend('snowflake', function ($connection){
+                return new SnowflakeSchema($connection);
+            });
+        });
+
+        $this->app->resolving('db', function (DatabaseManager $db){
+            $db->extend('snowflake', function ($config){
+                $connector = new SnowflakeConnector();
+                $connection = $connector->connect($config);
+
+                return new SnowflakeConnection($connection, $config['database'], '', $config);
+            });
+        });
 
         // Add our service types.
         $this->app->resolving('df.service', function (ServiceManager $df) {

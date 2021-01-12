@@ -1,60 +1,103 @@
 <?php
+
 namespace DreamFactory\Core\Snowflake\Models;
 
-use DreamFactory\Core\SqlDb\Models\SqlDbConfig;
+use DreamFactory\Core\Exceptions\BadRequestException;
+use DreamFactory\Core\SqlDb\Models\BaseSqlDbConfig;
 
 /**
  * SnowflakeDbConfig
  *
  */
-class SnowflakeDbConfig extends SqlDbConfig
+class SnowflakeDbConfig extends BaseSqlDbConfig
 {
+    protected $appends = ['account', 'username', 'password', 'database', 'warehouse', 'schema'];
+
+    protected $encrypted = ['username', 'password'];
+
+    protected $protected = ['password'];
+
+    protected function getConnectionFields()
+    {
+        return ['account', 'username', 'password', 'database', 'warehouse', 'schema'];
+    }
+
     public static function getDriverName()
     {
         return 'snowflake';
     }
 
+
     public static function getDefaultConnectionInfo()
     {
-        $defaults = parent::getDefaultConnectionInfo();
-        $defaults[] = [
-            'name'        => 'charset',
-            'label'       => 'Character Set',
-            'type'        => 'string',
-            'description' => 'The character set to use for this connection, i.e. ' . static::getDefaultCharset()
+        $defaults = [
+            [
+                'name'        => 'account',
+                'label'       => 'Account',
+                'type'        => 'string',
+                'description' => 'Your Snowflake account name (<a href="https://docs.snowflake.com/en/user-guide/connecting.html#your-snowflake-account-name">doc</a>).'
+            ],
+            [
+                'name'        => 'username',
+                'label'       => 'Username',
+                'type'        => 'string',
+                'description' => 'The name of the snowflake account user. This can be a lookup key.'
+            ],
+            [
+                'name'        => 'password',
+                'label'       => 'Password',
+                'type'        => 'password',
+                'description' => 'The password for the snowflake account user. This can be a lookup key.'
+            ],
+            [
+                'name'        => 'database',
+                'label'       => 'Database',
+                'type'        => 'string',
+                'description' => 'The name of the database to connect to on the given server. This can be a lookup key.'
+            ],
+            [
+                'name'        => 'warehouse',
+                'label'       => 'Warehouse',
+                'type'        => 'string',
+                'description' => 'The password for the snowflake account user. This can be a lookup key.'
+            ],
+            [
+                'name'        => 'schema',
+                'label'       => 'Schema',
+                'type'        => 'string',
+                'description' => 'Leave blank to work with the default schema ' .
+                    'or type in a specific schema to use for this service.'
+            ]
         ];
-        $defaults[] = [
-            'name'        => 'collation',
-            'label'       => 'Character Set Collation',
-            'type'        => 'string',
-            'description' => 'The character set collation to use for this connection, i.e. ' .
-                static::getDefaultCollation()
-        ];
-        $defaults[] = [
-            'name'        => 'timezone',
-            'label'       => 'Timezone',
-            'type'        => 'string',
-            'description' => 'Set the timezone for this connection.'
-        ];
-        $defaults[] = [
-            'name'        => 'modes',
-            'label'       => 'Session Modes',
-            'type'        => 'string',
-            'description' => 'Connection session modes to set. Use comma-delimited string, or set \'strict\' below.'
-        ];
-        $defaults[] = [
-            'name'        => 'strict',
-            'label'       => 'Use Strict Mode',
-            'type'        => 'boolean',
-            'description' => 'Enable strict session mode.'
-        ];
-        $defaults[] = [
-            'name'        => 'unix_socket',
-            'label'       => 'Socket Connection',
-            'type'        => 'string',
-            'description' => 'The name of the socket. Do not use with host and port.'
-        ];
-
         return $defaults;
+    }
+
+    /** {@inheritdoc} */
+    public static function getConfigSchema()
+    {
+        $schema = parent::getConfigSchema();
+        $cacheTtl = array_pop($schema);
+        $cacheEnabled = array_pop($schema);
+        $maxRecords = array_pop($schema);
+        $upserts = array_pop($schema);
+        array_pop($schema);                 // Remove statement
+        array_pop($schema);                 // Remove attributes
+        array_pop($schema);                 // Remove options
+        array_push($schema, $upserts);      // Restore upsert
+        array_push($schema, $maxRecords);   // Restore max_records
+        array_push($schema, $cacheEnabled); // Restore cache enabled
+        array_push($schema, $cacheTtl);     // Restore cache TTL
+
+        return $schema;
+    }
+
+    public function validate($data, $throwException = true)
+    {
+        $connection = $this->getAttribute('connection');
+        if (empty(array_get($connection, 'account')) || empty(array_get($connection, 'database')) || empty(array_get($connection, 'warehouse'))) {
+            throw new BadRequestException("Database connection information must contain account, database, and warehouse.");
+        }
+
+        return parent::validate($data, $throwException);
     }
 }
