@@ -93,6 +93,53 @@ SQL;
     /**
      * @inheritdoc
      */
+        protected function loadTableColumns(TableSchema $table)
+    {
+        $this->connection->statement('show columns in table ' . $table->quotedName);
+        $this->connection->statement('set s_c=last_query_id();');
+        $this->connection->statement('desc table ' . $table->quotedName);
+        $this->connection->statement('set d_t=last_query_id();');
+
+        $sql = <<<SQL
+select d.*, s."autoincrement" from table(result_scan(\$d_t)) as d
+JOIN table(result_scan(\$s_c)) as s
+ON d."name" = s."column_name";
+SQL;
+
+        $result = $this->connection->select($sql);
+        foreach ($result as $column) {
+            $column = array_change_key_case((array)$column, CASE_LOWER);
+            $c = new ColumnSchema(['name' => $column['name']]);
+            $c->quotedName = $this->quoteColumnName($c->name);
+            $c->allowNull = $column['null?'] === 'Y';
+            $c->isPrimaryKey = strpos($column['primary key'], 'Y') !== false;
+            $c->isUnique = strpos($column['unique key'], 'Y') !== false;
+            $c->autoIncrement = isset($column['autoincrement']) && $column['autoincrement'] !== '' ? true : false;
+            $c->dbType = $column['type'];
+            if (isset($column['comment'])) {
+                $c->comment = $column['comment'];
+            }
+            $this->extractLimit($c, $c->dbType);
+            $c->fixedLength = $this->extractFixedLength($c->dbType);
+            $this->extractType($c, $c->dbType);
+            $this->extractDefault($c, $column['default']);
+
+            if ($c->isPrimaryKey) {
+                if ($c->autoIncrement) {
+                    $table->sequenceName = array_get($column, 'sequence', $c->name);
+                    if ((DbSimpleTypes::TYPE_INTEGER === $c->type)) {
+                        $c->type = DbSimpleTypes::TYPE_ID;
+                    }
+                }
+                $table->addPrimaryKey($c->name);
+            }
+            $table->addColumn($c);
+        }
+    }
+
+    /**
+     * @inheritdoc
+     */
     protected function getTableConstraints($schema = '')
     {
         if (is_array($schema)) {
