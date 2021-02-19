@@ -64,6 +64,10 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             throw new \InvalidArgumentException("Warehouse not given, required.");
         }
 
+        if (!empty($role)) {
+            $dsn .= "role={$role};";
+        }
+
         return $dsn;
     }
 }
