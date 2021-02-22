@@ -41,15 +41,11 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
 
         $dsn = "snowflake:";
 
-        if (empty($account)) {
-            throw new \InvalidArgumentException("Account not given, required.");
-        } else {
+        if (!empty($account)) {
             $dsn .= "account={$account};";
         }
 
-        if (empty($database)) {
-            throw new \InvalidArgumentException("Database not given, required.");
-        } else {
+        if (!empty($database)) {
             $dsn .= "database={$database};";
         }
 
@@ -60,9 +56,7 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             $dsn .= "schema={$schema};";
         }
 
-        if (empty($warehouse)) {
-            throw new \InvalidArgumentException("Warehouse not given, required.");
-        } else {
+        if (!empty($warehouse)) {
             $dsn .= "warehouse={$warehouse};";
         }
 
