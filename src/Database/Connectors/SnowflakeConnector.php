@@ -15,12 +15,14 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
      * @var array
      */
     protected $options = [
-        PDO::ATTR_ERRMODE           => PDO::ERRMODE_EXCEPTION
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION
     ];
 
     public function connect(array $config)
     {
         $options = array_merge($this->getOptions($config), $this->options);
+        $this->checkUrlParams($config);
+        $this->checkHeaders($config);
         $dsn = $this->getDsn($config);
         $connection = $this->createConnection($dsn, $config, $options);
 
@@ -30,7 +32,7 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
     /**
      * Create a DSN string from a configuration.
      *
-     * @param  array $config
+     * @param array $config
      * @return string
      */
     protected function getDsn(array $config)
@@ -58,10 +60,10 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             $dsn .= "schema={$schema};";
         }
 
-        if (!empty($warehouse)) {
-            $dsn .= "warehouse={$warehouse};";
-        } else {
+        if (empty($warehouse)) {
             throw new \InvalidArgumentException("Warehouse not given, required.");
+        } else {
+            $dsn .= "warehouse={$warehouse};";
         }
 
         if (!empty($role)) {
@@ -69,5 +71,45 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         }
 
         return $dsn;
+    }
+
+    protected function checkHeaders(&$config)
+    {
+        $this->substituteConfig('account', 'header', $config);
+        $this->substituteConfig('database', 'header', $config);
+        $this->substituteConfig('schema', 'header', $config);
+        $this->substituteConfig('warehouse', 'header', $config);
+        $this->substituteConfig('username', 'header', $config);
+        $this->substituteConfig('password', 'header', $config);
+    }
+
+    protected function checkUrlParams(&$config)
+    {
+        $this->substituteConfig('account', 'url', $config);
+        $this->substituteConfig('database', 'url', $config);
+        $this->substituteConfig('schema', 'url', $config);
+        $this->substituteConfig('warehouse', 'url', $config);
+        $this->substituteConfig('username', 'url', $config);
+        $this->substituteConfig('password', 'url', $config);
+    }
+
+    protected function substituteConfig($name, $parameter, &$config)
+    {
+        switch ($parameter) {
+            case 'header':
+            {
+                if (request()->hasHeader($name) && !empty(request()->header($name))) {
+                    $config[$name] = request()->header($name);
+                }
+                break;
+            }
+            case 'url':
+            {
+                if (request()->has($name) && !empty(request()->query($name))) {
+                    $config[$name] = request()->query($name);
+                }
+                break;
+            }
+        }
     }
 }
