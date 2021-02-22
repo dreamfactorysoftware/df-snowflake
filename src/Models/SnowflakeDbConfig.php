@@ -96,14 +96,4 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
 
         return $schema;
     }
-
-    public function validate($data, $throwException = true)
-    {
-        $connection = $this->getAttribute('connection');
-        if (empty(array_get($connection, 'account')) || empty(array_get($connection, 'database')) || empty(array_get($connection, 'warehouse'))) {
-            throw new BadRequestException("Database connection information must contain account, database, and warehouse.");
-        }
-
-        return parent::validate($data, $throwException);
-    }
 }
