@@ -75,6 +75,7 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         $this->substituteConfig('warehouse', 'header', $config);
         $this->substituteConfig('username', 'header', $config);
         $this->substituteConfig('password', 'header', $config);
+        $this->substituteConfig('role', 'header', $config);
     }
 
     protected function checkUrlParams(&$config)
@@ -85,6 +86,7 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         $this->substituteConfig('warehouse', 'url', $config);
         $this->substituteConfig('username', 'url', $config);
         $this->substituteConfig('password', 'url', $config);
+        $this->substituteConfig('role', 'url', $config);
     }
 
     protected function substituteConfig($name, $parameter, &$config)
