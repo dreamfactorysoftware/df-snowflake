@@ -51,6 +51,7 @@ class SnowflakeDb extends SqlDb
                     $this->getHeaderPram('username'),
                     $this->getHeaderPram('password'),
                     $this->getHeaderPram('role'),
+                    $this->getHeaderPram('database'),
                     $this->getHeaderPram('warehouse'),
                     $this->getHeaderPram('schema')
                 ];
