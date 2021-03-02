@@ -15,16 +15,6 @@ use DreamFactory\Core\SqlDb\Database\Schema\SqlSchema;
 
 class SnowflakeSchema extends SqlSchema
 {
-    const DEFAULT_SCHEMA = 'PUBLIC';
-
-    /**
-     * @inheritdoc
-     */
-    public function getDefaultSchema()
-    {
-        return static::DEFAULT_SCHEMA;
-    }
-
     /**
      * @inheritdoc
      */
