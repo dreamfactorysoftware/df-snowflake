@@ -6,6 +6,7 @@ use DreamFactory\Core\Database\Components\DataReader;
 use DreamFactory\Core\Database\Schema\ColumnSchema;
 use DreamFactory\Core\Database\Schema\ParameterSchema;
 use DreamFactory\Core\Database\Schema\ProcedureSchema;
+use DreamFactory\Core\Database\Schema\FunctionSchema;
 use DreamFactory\Core\Database\Schema\RoutineSchema;
 use DreamFactory\Core\Database\Schema\TableSchema;
 use DreamFactory\Core\Enums\DbResourceTypes;
@@ -68,6 +69,36 @@ class SnowflakeSchema extends SqlSchema
             $names[strtolower($name)] = new TableSchema($settings);
         }
 
+        return $names;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function getRoutineNames($type, $schema = '')
+    {
+        $where = $type . '_SCHEMA = :schema';
+        if (!empty($schema)) {
+            $bindings[':schema'] = $schema;
+        }
+        $sql = <<<MYSQL
+SELECT {$type}_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.{$type}S WHERE {$where}
+MYSQL;
+
+        $rows = $this->connection->select($sql, $bindings);
+
+        $names = [];
+        foreach ($rows as $row) {
+            $row = array_change_key_case((array)$row, CASE_UPPER);
+            $resourceName = array_get($row, $type . '_NAME');
+            $schemaName = $schema;
+            $internalName = $schemaName . '.' . $resourceName;
+            $name = $resourceName;
+            $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
+            $settings = compact('schemaName', 'resourceName', 'name', 'quotedName', 'internalName');
+            $names[strtolower($name)] =
+                ('PROCEDURE' === $type) ? new ProcedureSchema($settings) : new FunctionSchema($settings);
+        }
         return $names;
     }
 
