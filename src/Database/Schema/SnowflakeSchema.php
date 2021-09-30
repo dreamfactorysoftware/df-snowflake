@@ -75,6 +75,22 @@ class SnowflakeSchema extends SqlSchema
     /**
      * @inheritdoc
      */
+    protected function getRoutineParamString(array $param_schemas, array &$values)
+    {
+        $paramStr = '';
+        foreach ($param_schemas as $key => $paramSchema) {
+            if (!empty($values[strtolower($paramSchema->name)])) {
+                $pName = ':' . $paramSchema->name;
+                $paramStr .= (empty($paramStr)) ? $pName : ", $pName";
+            }
+        }
+
+        return $paramStr;
+    }
+
+    /**
+     * @inheritdoc
+     */
     protected function getRoutineNames($type, $schema = '')
     {
         $where = $type . '_SCHEMA = :schema';
@@ -95,7 +111,11 @@ MYSQL;
             $internalName = $schemaName . '.' . $resourceName;
             $name = $resourceName;
             $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
-            $settings = compact('schemaName', 'resourceName', 'name', 'quotedName', 'internalName');
+            $returnType = array_get($row, 'DATA_TYPE');
+            if (!empty($returnType) && (0 !== strcasecmp('void', $returnType))) {
+                $returnType = static::extractSimpleType($returnType);
+            }
+            $settings = compact('schemaName', 'resourceName', 'name', 'quotedName', 'internalName', 'returnType');
             $names[strtolower($name)] =
                 ('PROCEDURE' === $type) ? new ProcedureSchema($settings) : new FunctionSchema($settings);
         }
@@ -114,7 +134,200 @@ SQL;
     /**
      * @inheritdoc
      */
-        protected function loadTableColumns(TableSchema $table)
+    public function callProcedure($procedure, array $in_params, array &$out_params)
+    {
+        if (!$this->supportsResourceType(DbResourceTypes::TYPE_PROCEDURE)) {
+            throw new BadRequestException('Stored Procedures are not supported by this database connection.');
+        }
+
+        $paramSchemas = $procedure->getParameters();
+        $values = $this->determineRoutineValues($paramSchemas, $in_params);
+
+        $sql = $this->getProcedureStatement($procedure, $paramSchemas, $values);
+
+        /** @type \PDOStatement $statement */
+        if (!$statement = $this->connection->getPdo()->prepare($sql)) {
+            throw new InternalServerErrorException('Failed to prepare statement: ' . $sql);
+        }
+
+        // do binding
+        $this->doRoutineBinding($statement, $paramSchemas, $values);
+
+        // support multiple result sets
+        $result = [];
+        try {
+            $statement->execute();
+            $reader = new DataReader($statement);
+            $reader->setFetchMode(static::ROUTINE_FETCH_MODE);
+            try {
+                if (0 < $reader->getColumnCount()) {
+                    $temp = $reader->readAll();
+                }
+            } catch (\Exception $ex) {
+                // latest oracle driver seems to kick this back for all OUT params even though it works, ignore for now
+                if (false === stripos($ex->getMessage(),
+                        'ORA-24374: define not done before fetch or execute and fetch')
+                ) {
+                    throw $ex;
+                }
+            }
+            if (!empty($temp)) {
+                $result[] = $temp;
+            }
+        } catch (\Exception $ex) {
+            if (!$this->handleRoutineException($ex)) {
+                $errorInfo = $ex instanceof \PDOException ? $ex : null;
+                $message = $ex->getMessage();
+                throw new \Exception($message, (int)$ex->getCode(), $errorInfo);
+            }
+        }
+
+        // if there is only one data set, just return it
+        if (1 == count($result)) {
+            $result = $result[0];
+        }
+
+        // any post op?
+        $this->postProcedureCall($paramSchemas, $values);
+
+        $values = array_change_key_case($values, CASE_LOWER);
+        foreach ($paramSchemas as $key => $paramSchema) {
+            switch ($paramSchema->paramType) {
+                case 'OUT':
+                case 'INOUT':
+                    if (array_key_exists($key, $values)) {
+                        $value = $values[$key];
+                        $out_params[$paramSchema->name] = $this->typecastToClient($value, $paramSchema);
+                    }
+                    break;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function loadParameters(RoutineSchema $holder)
+    {
+        if (strpos(get_class($holder), 'Procedure') !== false) {
+            $type = 'PROCEDURE';
+        } else $type = 'FUNCTION';
+
+
+        $sql = <<<MYSQL
+SELECT * FROM INFORMATION_SCHEMA.{$type}S WHERE {$type}_NAME = '{$holder->resourceName}' AND {$type}_SCHEMA = '{$holder->schemaName}'
+MYSQL;
+
+        $bindings = [':object' => $type, ':schema' => $holder->schemaName];
+
+        $rows = $this->connection->select($sql, $bindings);
+        foreach ($rows as $row) {
+            $row = array_change_key_case((array)$row, CASE_UPPER);
+            $argumentSignature = str_replace(['(', ')'], '"', array_get($row, 'ARGUMENT_SIGNATURE'));
+            $arguments = [];
+            eval('$arguments = explode( ", ", ' . $argumentSignature . ');');
+            foreach ($arguments as $key => $value) {
+                $pos = intval($key + 1);
+                // parse ARGUMENT_SIGNATURE
+                $argument = explode(' ', $value);
+                $argument['name'] = $argument[0] ?? null;
+                $argument['type'] = $argument[1] ?? null;
+                $name = $argument['name'];
+                $simpleType = static::extractSimpleType($argument['type']);
+                if (empty($name)) {
+                    $holder->returnType = array_get($row, 'DATA_TYPE');
+                } else {
+                    $holder->addParameter(new ParameterSchema([
+                            'name' => $name,
+                            'position' => $pos,
+                            // Snowflake supports only INPUT arguments
+                            'param_type' => 'IN',
+                            'type' => $simpleType,
+                            'db_type' => $argument['type'],
+                            'length' => (isset($row['CHARACTER_MAXIMUM_LENGTH']) ? intval(array_get($row, 'CHARACTER_MAXIMUM_LENGTH')) : null),
+                            'precision' => (isset($row['NUMERIC_PRECISION']) ? intval(array_get($row, 'NUMERIC_PRECISION'))
+                                : null),
+                            'scale' => (isset($row['NUMERIC_SCALE']) ? intval(array_get($row, 'NUMERIC_SCALE')) : null),
+                        ]
+                    ));
+                }
+            }
+        }
+    }
+
+
+    /**
+     * @param FunctionSchema $function
+     * @param array $in_params
+     *
+     * @return mixed
+     * @throws \Exception
+     */
+    public function callFunction($function, array $in_params)
+    {
+        if (!$this->supportsResourceType(DbResourceTypes::TYPE_FUNCTION)) {
+            throw new \Exception('Stored Functions are not supported by this database connection.');
+        }
+
+        $paramSchemas = $function->getParameters();
+        $values = $this->determineRoutineValues($paramSchemas, $in_params);
+
+        $sql = $this->getFunctionStatement($function, $paramSchemas, $values);
+        /** @type \PDOStatement $statement */
+        if (!$statement = $this->connection->getPdo()->prepare($sql)) {
+            throw new InternalServerErrorException('Failed to prepare statement: ' . $sql);
+        }
+
+        // do binding
+        $this->doRoutineBinding($statement, $paramSchemas, $values);
+
+        // support multiple result sets
+        $result = [];
+        try {
+            $statement->execute();
+            $reader = new DataReader($statement);
+            $reader->setFetchMode(static::ROUTINE_FETCH_MODE);
+            $temp = $reader->readAll();
+            if (!empty($temp)) {
+                $result[] = $temp;
+            }
+        } catch (\Exception $ex) {
+            if (!$this->handleRoutineException($ex)) {
+                $errorInfo = $ex instanceof \PDOException ? $ex : null;
+                $message = $ex->getMessage();
+                throw new \Exception($message, (int)$ex->getCode(), $errorInfo);
+            }
+        }
+
+        // if there is only one data set, just return it
+        if (1 == count($result)) {
+            $result = $result[0];
+            // if there is only one data set, search for an output
+            if (1 == count($result)) {
+                $result = current($result);
+                if (array_key_exists('output', $result)) {
+                    $value = $result['output'];
+
+                    return $this->typecastToClient($value, $function->returnType);
+                } elseif (array_key_exists($function->name, $result)) {
+                    // some vendors return the results as the function's name
+                    $value = $result[$function->name];
+
+                    return $this->typecastToClient($value, $function->returnType);
+                }
+            }
+        }
+
+        return $result;
+    }
+
+
+    /**
+     * @inheritdoc
+     */
+    protected function loadTableColumns(TableSchema $table)
     {
         $this->connection->statement('show columns in table ' . $table->quotedName);
         $this->connection->statement('set s_c=last_query_id();');
