@@ -2,200 +2,93 @@
 namespace DreamFactory\Core\Snowflake\Resources;
 
 use DB;
-use DreamFactory\Core\Database\Schema\ColumnSchema;
-use DreamFactory\Core\Enums\Verbs;
+use DreamFactory\Core\Enums\ApiOptions;
 use DreamFactory\Core\Exceptions\BadRequestException;
 use DreamFactory\Core\Exceptions\BatchException;
-use DreamFactory\Core\Exceptions\NotFoundException;
-use DreamFactory\Core\SqlDb\Resources\Table as MySqlTable;
-use DreamFactory\Core\Utility\Session;
+use DreamFactory\Core\SqlDb\Resources\Table;
 
-class SnowflakeTable extends MySqlTable
+class SnowflakeTable extends Table
 {
     /**
      * {@inheritdoc}
      */
-    protected function commitTransaction($extras = null)
+    public static function getPrimaryKeys($avail_fields, $names_only = false)
     {
-        $dbConn = $this->parent->getConnection();
-        if (empty($this->batchRecords) && empty($this->batchIds)) {
-            if (0 < $dbConn->transactionLevel()) {
-                $dbConn->commit();
+        $keys = [];
+        foreach ($avail_fields as $info) {
+            if ($info->isPrimaryKey || ($info->name === 'id' && $info->type === 'integer')) {
+                $keys[] = ($names_only ? $info->name : $info);
             }
-
-            return null;
         }
 
-        $updates = array_get($extras, 'updates');
-        $ssFilters = array_get($extras, 'ss_filters');
-        $related = array_get($extras, 'related');
-        $requireMore = array_get_bool($extras, 'require_more') || !empty($related);
-        $allowRelatedDelete = array_get_bool($extras, 'allow_related_delete');
-        $relatedInfo = $this->describeTableRelated($this->transactionTable);
+        return $keys;
+    }
 
-        $builder = $dbConn->table($this->transactionTableSchema->internalName);
+    /**
+     * {@inheritdoc}
+     */
+    public function createRecords($table, $records, $extras = [])
+    {
+        $records = static::validateAsArray($records, null, true, 'The request contains no valid record sets.');
 
-        /** @type ColumnSchema $idName */
-        $idName = (isset($this->tableIdsInfo, $this->tableIdsInfo[0])) ? $this->tableIdsInfo[0] : null;
-        if (empty($idName)) {
-            throw new BadRequestException('No valid identifier found for this table.');
+        $isSingle = (1 == count($records));
+        $fields = array_get($extras, ApiOptions::FIELDS);
+        $idFields = array_get($extras, ApiOptions::ID_FIELD);
+        $idTypes = array_get($extras, ApiOptions::ID_TYPE);
+        $rollback = array_get_bool($extras, ApiOptions::ROLLBACK, false);
+        $continue = array_get_bool($extras, ApiOptions::CONTINUES, false);
+        if ($rollback && $continue) {
+            throw new BadRequestException('Rollback and continue operations can not be requested at the same time.');
         }
 
-        if (!empty($this->batchRecords)) {
-            if (is_array($this->batchRecords[0])) {
-                $temp = [];
-                foreach ($this->batchRecords as $record) {
-                    $temp[] = array_get($record, $idName->getName(true));
-                }
+        $this->initTransaction($table, $idFields, $idTypes, false);
 
-                $builder->whereIn($idName->name, $temp);
-            } else {
-                $builder->whereIn($idName->name, $this->batchRecords);
-            }
-        } else {
-            $builder->whereIn($idName->name, $this->batchIds);
-        }
-
-        $serverFilter = $this->buildQueryStringFromData($ssFilters);
-        if (!empty($serverFilter)) {
-            Session::replaceLookups($serverFilter);
-            $params = [];
-            $filterString = $this->parseFilterString($serverFilter, $params, $this->tableFieldsInfo);
-            $builder->whereRaw($filterString, $params);
-        }
+        $extras['id_fields'] = $idFields;
+        $extras['require_more'] = static::requireMoreFields($fields, $idFields);
 
         $out = [];
-        $action = $this->getAction();
-        if (!empty($this->batchRecords)) {
-            if (1 == count($this->tableIdsInfo)) {
-                // records are used to retrieve extras
-                // ids array are now more like records
-                $result = $this->runQuery($this->transactionTable, $builder, $extras);
-                if (empty($result)) {
-                    throw new NotFoundException('No records were found using the given identifiers.');
+        $errors = false;
+        foreach ($records as $index => $record) {
+            try {
+                if (false === $id = $this->checkForIds($record, $this->tableIdsInfo, $extras, true)) {
+                    throw new BadRequestException("Required id field(s) not found in record $index: " .
+                        print_r($record, true));
                 }
 
-                $out = $result;
-            } else {
-                $out = $this->retrieveRecords($this->transactionTable, $this->batchRecords, $extras);
-            }
-
-            $this->batchRecords = [];
-        } elseif (!empty($this->batchIds)) {
-            switch ($action) {
-                case Verbs::PUT:
-                case Verbs::PATCH:
-                    if (!empty($updates)) {
-                        $parsed = $this->parseRecord($updates, $this->tableFieldsInfo, $ssFilters, true);
-                        if (!empty($parsed)) {
-                            $rows = $builder->update($parsed);
-                            if (count($this->batchIds) !== $rows) {
-                                throw new BadRequestException('Batch Error: Not all requested records could be updated.');
-                            }
-                        }
-
-                        foreach ($this->batchIds as $id) {
-                            if (!empty($relatedInfo)) {
-                                $this->updatePostRelations(
-                                    $this->transactionTable,
-                                    array_merge($updates, [$idName->getName(true) => $id]),
-                                    $relatedInfo,
-                                    $allowRelatedDelete
-                                );
-                            }
-                        }
-
-                        if ($requireMore) {
-                            $result = $this->runQuery(
-                                $this->transactionTable,
-                                $builder,
-                                $extras
-                            );
-
-                            $out = $result;
-                        }
-                    }
+                $out[$index] = $this->addToTransaction($record, $id, $extras, $rollback, $continue, $isSingle);
+            } catch (\Exception $ex) {
+                $errors = true;
+                $out[$index] = $ex;
+                if ($rollback || !$continue) {
                     break;
-
-                case Verbs::DELETE:
-                    $result = $this->runQuery(
-                        $this->transactionTable,
-                        $builder,
-                        $extras
-                    );
-                    if (count($this->batchIds) !== count($result)) {
-                        foreach ($this->batchIds as $index => $id) {
-                            $found = false;
-                            foreach ($result as $record) {
-                                if ($id == array_get($record, $idName->getName(true))) {
-                                    $out[$index] = $record;
-                                    $found = true;
-                                    break;
-                                }
-                            }
-                            if (!$found) {
-                                $out[$index] = new NotFoundException("Record with identifier '" . print_r($id,
-                                        true) . "' not found.");
-                            }
-                        }
-                    } else {
-                        $out = $result;
-                    }
-
-                    $rows = $builder->delete();
-                    if (count($this->batchIds) !== $rows) {
-                        throw new BatchException($out, 'Batch Error: Not all requested records could be deleted.');
-                    }
-                    break;
-
-                case Verbs::GET:
-                    $result = $this->runQuery(
-                        $this->transactionTable,
-                        $builder,
-                        $extras
-                    );
-
-                    if (count($this->batchIds) !== count($result)) {
-                        foreach ($this->batchIds as $index => $id) {
-                            $found = false;
-                            foreach ($result as $record) {
-                                if ($id == array_get($record, $idName->getName(true))) {
-                                    $out[$index] = $record;
-                                    $found = true;
-                                    break;
-                                }
-                            }
-                            if (!$found) {
-                                $out[$index] = new NotFoundException("Record with identifier '" . print_r($id,
-                                        true) . "' not found.");
-                            }
-                        }
-
-                        throw new BatchException($out, 'Batch Error: Not all requested records could be retrieved.');
-                    }
-
-                    $out = $result;
-                    break;
-
-                default:
-                    break;
-            }
-
-            if (empty($out)) {
-                $out = [];
-                foreach ($this->batchIds as $id) {
-                    $out[] = [$idName->getName(true) => $id];
                 }
             }
-
-            $this->batchIds = [];
         }
 
-        if (0 < $dbConn->transactionLevel()) {
-            $dbConn->commit();
+        if ($errors) {
+            $msg = 'Batch Error: Not all requested records could be created.';
+
+            if ($rollback) {
+                $this->rollbackTransaction();
+                $msg .= " All changes rolled back.";
+            }
+
+            throw new BatchException($out, $msg);
+        }
+
+        if ($result = $this->commitTransaction($extras)) {
+            // operation performed, take output, override earlier
+            $out = $result;
         }
 
         return $out;
     }
 
+    /**
+     * {@inheritdoc}
+     */
+    protected function rollbackTransaction()
+    {
+        // TODO: Implement rollbackTransaction() method.
+    }
 }

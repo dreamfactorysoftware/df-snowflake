@@ -28,6 +28,26 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
     }
 
     /**
+     * Create a new PDO connection instance.
+     *
+     * @param string $dsn
+     * @param string $username
+     * @param string $password
+     * @param array $options
+     * @return \PDO
+     */
+    protected function createPdoConnection($dsn, $username, $password, $options)
+    {
+        $pdo = new PDO($dsn, $username, $password);
+        foreach ($options as $key => $value) {
+            $pdo->setAttribute($key, $value);
+        }
+
+        return $pdo;
+    }
+
+
+    /**
      * Create a DSN string from a configuration.
      *
      * @param array $config

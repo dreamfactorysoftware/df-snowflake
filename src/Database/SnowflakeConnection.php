@@ -5,7 +5,6 @@ namespace DreamFactory\Core\Snowflake\Database;
 use DreamFactory\Core\Snowflake\Database\Query\Grammars\SnowflakeGrammar;
 use DreamFactory\Core\Snowflake\Database\Query\Processors\SnowflakeProcessor;
 use DreamFactory\Core\Snowflake\Database\Schema\Grammars\SnowflakeGrammar as SchemaGrammar;
-use DreamFactory\Core\Snowflake\Database\Schema\SnowflakeSchema;
 use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use PDO;
@@ -116,11 +115,5 @@ class SnowflakeConnection extends Connection
         $query = new Builder($this, $this->getQueryGrammar(), $processor);
 
         return $query->from($table, $as);
-    }
-
-    protected function createTransaction()
-    {
-        $this->getPdo()->setAttribute(\PDO::ATTR_AUTOCOMMIT, 0);
-        parent::createTransaction();
     }
 }
