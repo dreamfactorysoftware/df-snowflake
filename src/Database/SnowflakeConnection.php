@@ -71,6 +71,31 @@ class SnowflakeConnection extends Connection
         $this->statement('SET SCHEMA ?', [strtoupper($schema)]);
     }
 
+    public function statement($query, $bindings = [])
+    {
+        return $this->run($query, $bindings, function ($query, $bindings) {
+            if ($this->pretending()) {
+                return true;
+            }
+
+            $statement = $this->getPdo()->prepare($query);
+
+            $this->bindValues($statement, $this->prepareBindings($bindings));
+
+            $this->recordsHaveBeenModified();
+
+            $result = $statement->execute();
+            if (false === $result) {
+                $errorInfo = $statement->errorInfo();
+                $errorMessage = $errorInfo[2];
+                if ($errorMessage !== null) {
+                    $errorCode = $errorInfo[1];
+                    throw new \Exception($errorMessage, $errorCode);
+                }
+            }
+            return $result;
+        });
+    }
 
     /**
      * Get the default query grammar instance

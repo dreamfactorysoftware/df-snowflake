@@ -2,6 +2,7 @@
 
 namespace DreamFactory\Core\Snowflake\Services;
 
+use DreamFactory\Core\Snowflake\Resources\SnowflakeSchemaResource;
 use DreamFactory\Core\Snowflake\Resources\SnowflakeTable as Table;
 use DreamFactory\Core\Exceptions\InternalServerErrorException;
 use DreamFactory\Core\Resources\BaseRestResource;
@@ -72,6 +73,12 @@ class SnowflakeDb extends SqlDb
             'name' => Table::RESOURCE_NAME,
             'class_name' => Table::class,
             'label' => 'Table',
+        ];
+
+        $handlers[SnowflakeSchemaResource::RESOURCE_NAME] = [
+            'name'       => SnowflakeSchemaResource::RESOURCE_NAME,
+            'class_name' => SnowflakeSchemaResource::class,
+            'label'      => 'Schema Table',
         ];
 
         return $handlers;
