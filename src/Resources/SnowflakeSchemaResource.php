@@ -2,10 +2,6 @@
 namespace DreamFactory\Core\Snowflake\Resources;
 
 use DreamFactory\Core\Database\Resources\DbSchemaResource;
-use DreamFactory\Core\Enums\ApiOptions;
-use DreamFactory\Core\Exceptions\BadRequestException;
-use DreamFactory\Core\Exceptions\NotFoundException;
-use DreamFactory\Core\Utility\ResourcesWrapper;
 
 class SnowflakeSchemaResource extends DbSchemaResource
 {
