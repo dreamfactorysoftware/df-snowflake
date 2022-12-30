@@ -7,6 +7,7 @@ use DreamFactory\Core\Snowflake\Resources\SnowflakeTable as Table;
 use DreamFactory\Core\Exceptions\InternalServerErrorException;
 use DreamFactory\Core\Resources\BaseRestResource;
 use DreamFactory\Core\SqlDb\Services\SqlDb;
+use Arr;
 
 /**
  * Class SnowflakeDb
@@ -32,7 +33,7 @@ class SnowflakeDb extends SqlDb
     public function getApiDocInfo()
     {
         $base = parent::getApiDocInfo();
-        $paths = (array)array_get($base, 'paths');
+        $paths = (array)Arr::get($base, 'paths');
         foreach ($paths as $pkey => $path) {
             foreach ($path as $rkey => $resource) {
                 if ($rkey === 'patch' || $rkey === 'put') {

@@ -6,6 +6,7 @@ use DreamFactory\Core\Enums\ApiOptions;
 use DreamFactory\Core\Exceptions\BadRequestException;
 use DreamFactory\Core\Exceptions\BatchException;
 use DreamFactory\Core\SqlDb\Resources\Table;
+use Arr;
 
 class SnowflakeTable extends Table
 {
@@ -32,9 +33,9 @@ class SnowflakeTable extends Table
         $records = static::validateAsArray($records, null, true, 'The request contains no valid record sets.');
 
         $isSingle = (1 == count($records));
-        $fields = array_get($extras, ApiOptions::FIELDS);
-        $idFields = array_get($extras, ApiOptions::ID_FIELD);
-        $idTypes = array_get($extras, ApiOptions::ID_TYPE);
+        $fields = Arr::get($extras, ApiOptions::FIELDS);
+        $idFields = Arr::get($extras, ApiOptions::ID_FIELD);
+        $idTypes = Arr::get($extras, ApiOptions::ID_TYPE);
         $rollback = array_get_bool($extras, ApiOptions::ROLLBACK, false);
         $continue = array_get_bool($extras, ApiOptions::CONTINUES, false);
         if ($rollback && $continue) {

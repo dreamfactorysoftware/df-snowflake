@@ -2,6 +2,7 @@
 namespace DreamFactory\Core\Snowflake\Resources;
 
 use DreamFactory\Core\Database\Resources\DbSchemaResource;
+use Arr;
 
 class SnowflakeSchemaResource extends DbSchemaResource
 {
@@ -22,7 +23,7 @@ class SnowflakeSchemaResource extends DbSchemaResource
 
         $tables = [['name' => $table, 'related' => $fields]];
         $result = $this->updateSchema($tables, !$check_exist);
-        $result = array_get($result, 0, []);
+        $result = Arr::get($result, 0, []);
 
         //  Any changes here should refresh cached schema
         $this->refreshCachedTables();

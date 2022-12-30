@@ -65,7 +65,7 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'name' => 'warehouse',
                 'label' => 'Warehouse',
                 'type' => 'string',
-                'description' => 'The password for the snowflake account user. This can be a lookup key.'
+                'description' => 'The name of the warehouse your database uses.'
             ],
             [
                 'name' => 'schema',
