@@ -13,6 +13,7 @@ use DreamFactory\Core\Enums\DbResourceTypes;
 use DreamFactory\Core\Enums\DbSimpleTypes;
 use DreamFactory\Core\Exceptions\InternalServerErrorException;
 use DreamFactory\Core\SqlDb\Database\Schema\SqlSchema;
+use Arr;
 
 class SnowflakeSchema extends SqlSchema
 {
@@ -106,12 +107,12 @@ MYSQL;
         $names = [];
         foreach ($rows as $row) {
             $row = array_change_key_case((array)$row, CASE_UPPER);
-            $resourceName = array_get($row, $type . '_NAME');
+            $resourceName = Arr::get($row, $type . '_NAME');
             $schemaName = $schema;
             $internalName = $schemaName . '.' . $resourceName;
             $name = $resourceName;
             $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
-            $returnType = array_get($row, 'DATA_TYPE');
+            $returnType = Arr::get($row, 'DATA_TYPE');
             if (!empty($returnType) && (0 !== strcasecmp('void', $returnType))) {
                 $returnType = static::extractSimpleType($returnType);
             }
@@ -211,7 +212,7 @@ SQL;
      */
     protected function loadParameters(RoutineSchema $holder)
     {
-        if (strpos(get_class($holder), 'Procedure') !== false) {
+        if (str_contains($holder::class, 'Procedure')) {
             $type = 'PROCEDURE';
         } else $type = 'FUNCTION';
 
@@ -225,7 +226,7 @@ MYSQL;
         $rows = $this->connection->select($sql, $bindings);
         foreach ($rows as $row) {
             $row = array_change_key_case((array)$row, CASE_UPPER);
-            $argumentSignature = str_replace(['(', ')'], '"', array_get($row, 'ARGUMENT_SIGNATURE'));
+            $argumentSignature = str_replace(['(', ')'], '"', Arr::get($row, 'ARGUMENT_SIGNATURE'));
             $arguments = [];
             eval('$arguments = explode( ", ", ' . $argumentSignature . ');');
             foreach ($arguments as $key => $value) {
@@ -237,7 +238,7 @@ MYSQL;
                 $name = $argument['name'];
                 $simpleType = static::extractSimpleType($argument['type']);
                 if (empty($name)) {
-                    $holder->returnType = array_get($row, 'DATA_TYPE');
+                    $holder->returnType = Arr::get($row, 'DATA_TYPE');
                 } else {
                     $holder->addParameter(new ParameterSchema([
                             'name' => $name,
@@ -246,10 +247,10 @@ MYSQL;
                             'param_type' => 'IN',
                             'type' => $simpleType,
                             'db_type' => $argument['type'],
-                            'length' => (isset($row['CHARACTER_MAXIMUM_LENGTH']) ? intval(array_get($row, 'CHARACTER_MAXIMUM_LENGTH')) : null),
-                            'precision' => (isset($row['NUMERIC_PRECISION']) ? intval(array_get($row, 'NUMERIC_PRECISION'))
+                            'length' => (isset($row['CHARACTER_MAXIMUM_LENGTH']) ? intval(Arr::get($row, 'CHARACTER_MAXIMUM_LENGTH')) : null),
+                            'precision' => (isset($row['NUMERIC_PRECISION']) ? intval(Arr::get($row, 'NUMERIC_PRECISION'))
                                 : null),
-                            'scale' => (isset($row['NUMERIC_SCALE']) ? intval(array_get($row, 'NUMERIC_SCALE')) : null),
+                            'scale' => (isset($row['NUMERIC_SCALE']) ? intval(Arr::get($row, 'NUMERIC_SCALE')) : null),
                         ]
                     ));
                 }
@@ -346,8 +347,8 @@ SQL;
             $c = new ColumnSchema(['name' => $column['name']]);
             $c->quotedName = $this->quoteColumnName($c->name);
             $c->allowNull = $column['null?'] === 'Y';
-            $c->isPrimaryKey = strpos($column['primary key'], 'Y') !== false;
-            $c->isUnique = strpos($column['unique key'], 'Y') !== false;
+            $c->isPrimaryKey = str_contains($column['primary key'], 'Y');
+            $c->isUnique = str_contains($column['unique key'], 'Y');
             $c->autoIncrement = isset($column['autoincrement']) && $column['autoincrement'] !== '' ? true : false;
             $c->dbType = $column['type'];
             if (isset($column['comment'])) {
@@ -360,7 +361,7 @@ SQL;
 
             if ($c->isPrimaryKey) {
                 if ($c->autoIncrement) {
-                    $table->sequenceName = array_get($column, 'sequence', $c->name);
+                    $table->sequenceName = Arr::get($column, 'sequence', $c->name);
                     if ((DbSimpleTypes::TYPE_INTEGER === $c->type)) {
                         $c->type = DbSimpleTypes::TYPE_ID;
                     }
@@ -410,8 +411,8 @@ SQL;
             $ts = strtolower($row['table_schema']);
             $tn = strtolower($row['table_name']);
             $cn = strtolower($row['constraint_name']);
-            $colName = array_get($row, 'column_name');
-            $refColName = array_get($row, 'referenced_column_name');
+            $colName = Arr::get($row, 'column_name');
+            $refColName = Arr::get($row, 'referenced_column_name');
             if (isset($constraints[$ts][$tn][$cn])) {
                 $constraints[$ts][$tn][$cn]['column_name'] =
                     array_merge((array)$constraints[$ts][$tn][$cn]['column_name'], (array)$colName);

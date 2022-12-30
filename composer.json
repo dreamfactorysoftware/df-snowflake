@@ -25,7 +25,7 @@
   "minimum-stability": "dev",
   "prefer-stable": true,
   "require":     {
-    "dreamfactory/df-sqldb": "~0.17"
+    "dreamfactory/df-sqldb": "~1.0"
   },
   "require-dev": {
     "phpunit/phpunit": "@stable"

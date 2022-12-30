@@ -17,7 +17,7 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
     public function register()
     {
 
-        $this->app->resolving('db.schema', function (DbSchemaExtensions $db){
+        $this->app->resolving('df.db.schema', function (DbSchemaExtensions $db){
             $db->extend('snowflake', function ($connection){
                 return new SnowflakeSchema($connection);
             });
