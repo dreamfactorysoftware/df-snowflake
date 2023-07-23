@@ -45,6 +45,7 @@ class SnowflakeDb extends SqlDb
         foreach ($paths as $pkey => $path) {
             if ($pkey !== '/' && isset($path['get']) && isset($path['get']['parameters'])) {
                 $newParams = [
+                    $this->getHeaderPram('hostname'),
                     $this->getHeaderPram('account'),
                     $this->getHeaderPram('username'),
                     $this->getHeaderPram('password'),
