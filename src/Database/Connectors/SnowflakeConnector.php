@@ -59,6 +59,10 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
 
         $dsn = "snowflake:";
 
+        if (!empty($hostname)) {
+            $dsn .= "host={$hostname};";
+        }
+
         if (!empty($account)) {
             $dsn .= "account={$account};";
         }

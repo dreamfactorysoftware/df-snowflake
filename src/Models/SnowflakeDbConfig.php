@@ -11,7 +11,7 @@ use DreamFactory\Core\SqlDb\Models\BaseSqlDbConfig;
  */
 class SnowflakeDbConfig extends BaseSqlDbConfig
 {
-    protected $appends = ['account', 'username', 'password', 'database', 'warehouse', 'schema', 'role'];
+    protected $appends = ['hostname', 'account', 'username', 'password', 'database', 'warehouse', 'schema', 'role'];
 
     protected $encrypted = ['username', 'password'];
 
@@ -19,7 +19,7 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
 
     protected function getConnectionFields()
     {
-        return ['account', 'username', 'password', 'database', 'warehouse', 'schema', 'role'];
+        return ['hostname', 'account', 'username', 'password', 'database', 'warehouse', 'schema', 'role'];
     }
 
     public static function getDriverName()
@@ -31,6 +31,12 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
     public static function getDefaultConnectionInfo()
     {
         $defaults = [
+            [
+                'name' => 'hostname',
+                'label' => 'Hostname',
+                'type' => 'string',
+                'description' => 'Snowflake hostname, This can be alternative snowflake hostname (Optional).'
+            ],
             [
                 'name' => 'account',
                 'label' => 'Account',
