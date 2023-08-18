@@ -63,6 +63,7 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
 
     protected function checkHeaders(&$config)
     {
+        $this->substituteConfig('hostname', 'header', $config);
         $this->substituteConfig('account', 'header', $config);
         $this->substituteConfig('database', 'header', $config);
         $this->substituteConfig('schema', 'header', $config);
@@ -74,7 +75,7 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
 
     protected function checkUrlParams(&$config)
     {
-
+        $this->substituteConfig('hostname', 'url', $config);
         $this->substituteConfig('account', 'url', $config);
         $this->substituteConfig('database', 'url', $config);
         $this->substituteConfig('schema', 'url', $config);
