@@ -70,6 +70,8 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
         $this->substituteConfig('warehouse', 'header', $config);
         $this->substituteConfig('username', 'header', $config);
         $this->substituteConfig('password', 'header', $config);
+        $this->substituteConfig('key', 'header', $config);
+        $this->substituteConfig('passcode', 'header', $config);
         $this->substituteConfig('role', 'header', $config);
     }
 
@@ -82,6 +84,8 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
         $this->substituteConfig('warehouse', 'url', $config);
         $this->substituteConfig('username', 'url', $config);
         $this->substituteConfig('password', 'url', $config);
+        $this->substituteConfig('key', 'header', $config);
+        $this->substituteConfig('passcode', 'header', $config);
         $this->substituteConfig('role', 'url', $config);
     }
 
