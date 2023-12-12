@@ -6,6 +6,9 @@ use DreamFactory\Core\Enums\ApiOptions;
 use DreamFactory\Core\Exceptions\BadRequestException;
 use DreamFactory\Core\Exceptions\BatchException;
 use DreamFactory\Core\SqlDb\Resources\Table;
+use DreamFactory\Core\Database\Schema\TableSchema;
+use Illuminate\Support\Collection;
+
 use Arr;
 
 class SnowflakeTable extends Table
@@ -83,6 +86,37 @@ class SnowflakeTable extends Table
         }
 
         return $out;
+    }
+    /**
+     * @param TableSchema $schema
+     * @param Collection $result
+     * @return array
+     */
+    public function decodeJsonField(TableSchema $schema, Collection $result): array {
+        $columns = $schema->getColumns();
+        $acceptedDbTypes = ["VARIANT"]; // Add your desired types here
+        $nvcharColumns = [];
+        foreach ($columns as $column) {
+            if (!in_array($column->dbType, $acceptedDbTypes)) continue;
+            $nvcharColumns[] = $column->name;
+        }
+        if (!empty($nvcharColumns)) {
+            $temp = $result->map(function ($item) use ($nvcharColumns) {
+                foreach ($nvcharColumns as $column) {
+                    // json_decode wil return object if the decode is success or null
+                    // in case of null => meaning the value is not valid json then we return the original value
+                    $item[$column] = json_decode($item[$column]) ?? $item[$column];
+                }
+                return $item;
+            });
+            $result = collect($temp);
+        }
+
+        $data = $result->toArray();
+        if (!empty($meta)) {
+            $data['meta'] = $meta;
+        }
+        return $data;
     }
 
     /**
