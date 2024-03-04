@@ -85,6 +85,8 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             $dsn .= "role={$role};";
         }
 
+        $dsn .= "application=DreamFactory_DreamFactory;";
+        
         return $dsn;
     }
 }
