@@ -124,6 +124,8 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             $dsn .= "priv_key_file_pwd={$passcode};";
         }
 
+        $dsn .= "application=DreamFactory_DreamFactory;";
+
         return $dsn;
     }
 }
