@@ -48,6 +48,34 @@ class SnowflakeSchema extends SqlSchema
     /**
      * @inheritdoc
      */
+    public function getProcedureNames($schema = '')
+    {
+        $sql = 'SHOW PROCEDURES ';
+
+        if (!empty($schema)) {
+            $sql .= ' IN ' . $this->quoteTableName($schema);
+        }
+
+        $rows = $this->connection->select($sql);
+
+        $names = [];
+        foreach ($rows as $row) {
+            $row = array_values((array)$row);
+            $schemaName = $schema;
+            $resourceName = $row[1];
+            $internalName = $schemaName . '.' . $resourceName;
+            $name = $resourceName;
+            $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
+            $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+            $names[strtolower($name)] = new ProcedureSchema($settings);
+        }
+
+        return $names;
+    }
+
+    /**
+     * @inheritdoc
+     */
     protected function getViewNames($schema = '')
     {
         $sql = 'SHOW VIEWS ';
