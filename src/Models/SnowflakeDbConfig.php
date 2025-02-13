@@ -11,15 +11,15 @@ use DreamFactory\Core\SqlDb\Models\BaseSqlDbConfig;
  */
 class SnowflakeDbConfig extends BaseSqlDbConfig
 {
-    protected $appends = ['hostname', 'account', 'username', 'password', 'database', 'warehouse', 'schema', 'role'];
+    protected $appends = ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role'];
 
-    protected $encrypted = ['username', 'password'];
+    protected $encrypted = ['username', 'password', 'key', 'passcode'];
 
     protected $protected = ['password'];
 
     protected function getConnectionFields()
     {
-        return ['hostname', 'account', 'username', 'password', 'database', 'warehouse', 'schema', 'role'];
+        return ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role'];
     }
 
     public static function getDriverName()
@@ -53,7 +53,20 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'name' => 'password',
                 'label' => 'Password',
                 'type' => 'password',
-                'description' => 'The password for the snowflake account user. This can be a lookup key.'
+                'description' => 'The password for the snowflake account user. This can be a lookup key.' .
+                    'If you are using a private key, leave this blank.'
+            ],
+            [
+                'name' => 'key',
+                'label' => 'key',
+                'type' => 'file',
+                'description' => 'Specifies the local path to the private key file you created.'
+            ],
+            [
+                'name' => 'passcode',
+                'label' => 'passcode',
+                'type' => 'string',
+                'description' => 'Specifies the passcode to decode the private key file. Omit if not required.'
             ],
             [
                 'name' => 'role',
