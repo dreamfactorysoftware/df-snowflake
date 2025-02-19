@@ -7,6 +7,7 @@ use DreamFactory\Core\Snowflake\Resources\SnowflakeTable as Table;
 use DreamFactory\Core\Exceptions\InternalServerErrorException;
 use DreamFactory\Core\Resources\BaseRestResource;
 use DreamFactory\Core\SqlDb\Services\SqlDb;
+use DreamFactory\Core\SqlDb\Resources\StoredProcedure;
 use Arr;
 
 /**
@@ -81,6 +82,12 @@ class SnowflakeDb extends SqlDb
             'name'       => SnowflakeSchemaResource::RESOURCE_NAME,
             'class_name' => SnowflakeSchemaResource::class,
             'label'      => 'Schema Table',
+        ];
+
+        $handlers[StoredProcedure::RESOURCE_NAME] = [
+            'name'       => StoredProcedure::RESOURCE_NAME,
+            'class_name' => StoredProcedure::class,
+            'label'      => 'Stored Procedure',
         ];
 
         return $handlers;

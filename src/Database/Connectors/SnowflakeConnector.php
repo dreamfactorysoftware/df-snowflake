@@ -27,6 +27,38 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         return $connection;
     }
 
+    public function createConnection($dsn, array $config, array $options)
+    {
+        [$username, $password] = [
+            $config['username'] ?? null, $config['password'] ?? null,
+        ];
+
+        try {
+            if ($password === null && $config['key'] !== null) {
+                return $this->createConnectionWithKeyPairAuth(
+                    $dsn, $username, $config, $options
+                );
+            }
+            return $this->createPdoConnection(
+                $dsn, $username, $password, $options
+            );
+        } catch (Exception $e) {
+            return $this->tryAgainIfCausedByLostConnection(
+                $e, $dsn, $username, $password, $options
+            );
+        }
+    }
+
+    protected function createConnectionWithKeyPairAuth($dsn, $username, $config, $options)
+    {
+        $pdo = new PDO($dsn, $username, "");
+        foreach ($options as $key => $value) {
+            $pdo->setAttribute($key, $value);
+        }
+
+        return $pdo;
+    }
+
     /**
      * Create a new PDO connection instance.
      *
@@ -45,7 +77,6 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
 
         return $pdo;
     }
-
 
     /**
      * Create a DSN string from a configuration.
@@ -84,6 +115,16 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         if (!empty($role)) {
             $dsn .= "role={$role};";
         }
+
+        if (!empty($key)) {
+            $dsn .= "authenticator=SNOWFLAKE_JWT;priv_key_file={$key};";
+        }
+
+        if (!empty($passcode)) {
+            $dsn .= "priv_key_file_pwd={$passcode};";
+        }
+
+        $dsn .= "application=DreamFactory_DreamFactory;";
 
         return $dsn;
     }
