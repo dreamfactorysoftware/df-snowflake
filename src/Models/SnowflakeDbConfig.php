@@ -50,23 +50,26 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'description' => 'The name of the snowflake account user. This can be a lookup key.'
             ],
             [
+                'name' => 'key',
+                'label' => 'Private Key File',
+                'type' => 'file_certificate_api',
+                'description' => 'Specifies the path to the private key file for key pair authentication. ' .
+                    'When using key pair authentication, select an existing key file from a file service or upload a new one. ' .
+                    'For information on creating key pairs, see <a href="https://docs.snowflake.com/en/user-guide/key-pair-auth" target="_blank">Snowflake Key Pair Authentication</a>.'
+            ],
+            [
                 'name' => 'password',
                 'label' => 'Password',
                 'type' => 'password',
-                'description' => 'The password for the snowflake account user. This can be a lookup key.' .
-                    'If you are using a private key, leave this blank.'
-            ],
-            [
-                'name' => 'key',
-                'label' => 'key',
-                'type' => 'file',
-                'description' => 'Specifies the local path to the private key file you created.'
+                'description' => 'The password for the snowflake account user. This can be a lookup key. ' .
+                    'If you are using key pair authentication, leave this blank.'
             ],
             [
                 'name' => 'passcode',
-                'label' => 'passcode',
-                'type' => 'string',
-                'description' => 'Specifies the passcode to decode the private key file. Omit if not required.'
+                'label' => 'Private Key Passphrase',
+                'type' => 'password',
+                'description' => 'If your private key file is encrypted, specify the passphrase here. ' .
+                    'Leave blank if your private key is not encrypted.'
             ],
             [
                 'name' => 'role',
