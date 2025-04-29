@@ -41,7 +41,7 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                     'name'            => 'snowflake',
                     'label'           => 'Snowflake',
                     'description'     => 'Database service supporting Snowflake connections.',
-                    'group'           => 'Big Data', // or if you want to use defined groups use DreamFactory\Core\Enums\ServiceTypeGroups, ServiceTypeGroups::REMOTE
+                    'group'           => 'Database', // or if you want to use defined groups use DreamFactory\Core\Enums\ServiceTypeGroups, ServiceTypeGroups::REMOTE
                     'subscription_required' => LicenseLevel::GOLD, // don't specify this if you want the service be used on Open Source version
                     'config_handler'  => SnowflakeDbConfig::class,
                     'factory'         => function ($config) {
