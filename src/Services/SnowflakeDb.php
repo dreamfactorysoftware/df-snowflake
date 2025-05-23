@@ -8,6 +8,7 @@ use DreamFactory\Core\Exceptions\InternalServerErrorException;
 use DreamFactory\Core\Resources\BaseRestResource;
 use DreamFactory\Core\SqlDb\Services\SqlDb;
 use DreamFactory\Core\SqlDb\Resources\StoredProcedure;
+use DreamFactory\Core\SqlDb\Resources\StoredFunction;
 use Arr;
 
 /**
@@ -261,6 +262,12 @@ class SnowflakeDb extends SqlDb
             'name'       => StoredProcedure::RESOURCE_NAME,
             'class_name' => StoredProcedure::class,
             'label'      => 'Stored Procedure',
+        ];
+
+        $handlers[StoredFunction::RESOURCE_NAME] = [
+            'name'       => StoredFunction::RESOURCE_NAME,
+            'class_name' => StoredFunction::class,
+            'label'      => 'Stored Function',
         ];
 
         return $handlers;
