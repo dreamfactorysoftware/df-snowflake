@@ -13,6 +13,7 @@ use DreamFactory\Core\Enums\DbResourceTypes;
 use DreamFactory\Core\Enums\DbSimpleTypes;
 use DreamFactory\Core\Exceptions\InternalServerErrorException;
 use DreamFactory\Core\SqlDb\Database\Schema\SqlSchema;
+use DreamFactory\Core\Exceptions\BadRequestException;
 use Arr;
 
 class SnowflakeSchema extends SqlSchema
@@ -106,15 +107,21 @@ class SnowflakeSchema extends SqlSchema
      */
     protected function getRoutineParamString(array $param_schemas, array &$values)
     {
-        $paramStr = '';
+        $paramParts = [];
         foreach ($param_schemas as $key => $paramSchema) {
-            if (!empty($values[strtolower($paramSchema->name)])) {
-                $pName = ':' . $paramSchema->name;
-                $paramStr .= (empty($paramStr)) ? $pName : ", $pName";
+            $paramTypeUpper = strtoupper($paramSchema->paramType);
+            if ($paramTypeUpper === 'IN' || $paramTypeUpper === 'INOUT') {
+                $placeholder = ':' . $paramSchema->name;
+
+                $dbTypeUpper = strtoupper($paramSchema->dbType);
+                if ($dbTypeUpper === 'ARRAY' || $dbTypeUpper === 'OBJECT' || $dbTypeUpper === 'VARIANT') {
+                    $paramParts[] = 'PARSE_JSON(' . $placeholder . ')';
+                } else {
+                    $paramParts[] = $placeholder;
+                }
             }
         }
-
-        return $paramStr;
+        return implode(', ', $paramParts);
     }
 
     /**
@@ -244,13 +251,14 @@ SQL;
             $type = 'PROCEDURE';
         } else $type = 'FUNCTION';
 
-
+        $dbNamePrefix = $holder->databaseName ? $this->quoteTableName($holder->databaseName) . '.' : '';
+ 
         $sql = <<<MYSQL
-SELECT * FROM INFORMATION_SCHEMA.{$type}S WHERE {$type}_NAME = '{$holder->resourceName}' AND {$type}_SCHEMA = '{$holder->schemaName}'
+SELECT * FROM {$dbNamePrefix}INFORMATION_SCHEMA.{$type}S WHERE {$type}_NAME = '{$holder->resourceName}' AND {$type}_SCHEMA = '{$holder->schemaName}'
 MYSQL;
 
         $bindings = [':object' => $type, ':schema' => $holder->schemaName];
-
+ 
         $rows = $this->connection->select($sql, $bindings);
         foreach ($rows as $row) {
             $row = array_change_key_case((array)$row, CASE_UPPER);
@@ -283,9 +291,15 @@ MYSQL;
                     ));
                 }
             }
+            if ($type === 'FUNCTION' && empty($arguments) && empty($holder->returnType)){
+                 $returnDbType = Arr::get($row, 'DATA_TYPE');
+                 if (!empty($returnDbType)) {
+                     $holder->returnType = static::extractSimpleType($returnDbType);
+                     $holder->returnDbtype = $returnDbType;
+                 }
+            }
         }
     }
-
 
     /**
      * @param FunctionSchema $function
@@ -457,4 +471,74 @@ SQL;
         return $constraints;
     }
 
+    /**
+     * @param array $param_schemas
+     * @param array $in_params
+     *
+     * @return array
+     * @throws \DreamFactory\Core\Exceptions\BadRequestException
+     */
+    protected function determineRoutineValues(array $param_schemas, array $in_params)
+    {
+        $in_params = static::cleanParameters($param_schemas, $in_params);
+        $values = [];
+        $index = -1;
+        // key is lowercase index
+        foreach ($param_schemas as $key => $paramSchema) {
+            $index++;
+            switch ($paramSchema->paramType) {
+                case 'IN':
+                case 'INOUT':
+                    if (array_key_exists($key, $in_params)) {
+                        $rawValue = $in_params[$key];
+                    } else {
+                        $rawValue = $paramSchema->defaultValue;
+                    }
+                    
+                    // For Snowflake, check if this parameter needs JSON encoding based on its type
+                    $dbTypeUpper = strtoupper($paramSchema->dbType ?? '');
+                    if (($dbTypeUpper === 'ARRAY' || $dbTypeUpper === 'OBJECT' || $dbTypeUpper === 'VARIANT') 
+                        && (is_array($rawValue) || is_object($rawValue))) {
+                        $values[$key] = json_encode($rawValue);
+                    } elseif (empty($paramSchema->dbType) && (is_array($rawValue) || is_object($rawValue))) {
+                        $values[$key] = json_encode($rawValue);
+                    } else {
+                        $values[$key] = $this->typecastToClient($rawValue, $paramSchema);
+                    }
+                    break;
+                case 'OUT':
+                    $values[$key] = null;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        return $values;
+    }
+
+    /**
+     * @param \DreamFactory\Core\Database\Schema\RoutineSchema $routine
+     * @param array                                            $param_schemas
+     * @param array                                            $values
+     *
+     * @return string
+     */
+    protected function getFunctionStatement(RoutineSchema $routine, array $param_schemas, array &$values)
+    {
+        $paramStr = $this->getRoutineParamString($param_schemas, $values);
+        
+        $funcNameParts = [];
+        if (!empty($routine->databaseName)) {
+            $funcNameParts[] = $this->quoteTableName($routine->databaseName);
+        }
+        if (!empty($routine->schemaName)) {
+            $funcNameParts[] = $this->quoteTableName($routine->schemaName);
+        }
+        $funcNameParts[] = $this->quoteTableName($routine->resourceName);
+        
+        $fullyQualifiedQuotedFuncName = implode('.', $funcNameParts);
+
+        return "SELECT {$fullyQualifiedQuotedFuncName}($paramStr) AS " . $this->quoteColumnName('output');
+    }
 }
