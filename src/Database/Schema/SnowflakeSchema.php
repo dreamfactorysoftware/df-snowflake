@@ -315,15 +315,25 @@ MYSQL;
         }
 
         $paramSchemas = $function->getParameters();
+        
+        // Filter parameter schemas to only include provided parameters for CORTEX functions
+        if ($this->isCortexFunction($function)) {
+            $paramSchemas = $this->filterProvidedParameters($paramSchemas, $in_params);
+        }
+
+        \Log::info('Function Param Schemas: ' . json_encode($paramSchemas));
+
         $values = $this->determineRoutineValues($paramSchemas, $in_params);
 
+        \Log::info('Values: ' . json_encode($values));
         $sql = $this->getFunctionStatement($function, $paramSchemas, $values);
+
+        \Log::info('SQL Query: ' . $sql);
         /** @type \PDOStatement $statement */
         if (!$statement = $this->connection->getPdo()->prepare($sql)) {
             throw new InternalServerErrorException('Failed to prepare statement: ' . $sql);
         }
 
-        // do binding
         $this->doRoutineBinding($statement, $paramSchemas, $values);
 
         // support multiple result sets
@@ -481,11 +491,13 @@ SQL;
     protected function determineRoutineValues(array $param_schemas, array $in_params)
     {
         $in_params = static::cleanParameters($param_schemas, $in_params);
+        
         $values = [];
         $index = -1;
         // key is lowercase index
         foreach ($param_schemas as $key => $paramSchema) {
             $index++;
+            
             switch ($paramSchema->paramType) {
                 case 'IN':
                 case 'INOUT':
@@ -540,5 +552,68 @@ SQL;
         $fullyQualifiedQuotedFuncName = implode('.', $funcNameParts);
 
         return "SELECT {$fullyQualifiedQuotedFuncName}($paramStr) AS " . $this->quoteColumnName('output');
+    }
+
+    /**
+     * Check if this is a CORTEX function that needs parameter filtering
+     *
+     * @param FunctionSchema $function
+     * @return bool
+     */
+    protected function isCortexFunction($function)
+    {
+        $schemaName = isset($function->schemaName) ? strtoupper($function->schemaName) : '';
+        $resourceName = isset($function->resourceName) ? strtoupper($function->resourceName) : '';
+
+        // List of known Cortex functions (extend if needed)
+        $knownCortexFunctions = [
+            'COMPLETE',
+            'CLASSIFY_TEXT',
+            'EXTRACT_ANSWER',
+            'SENTIMENT',
+            'SUMMARIZE',
+            'TRANSLATE',
+            'EMBED_TEXT',
+            'EMBED_TEXT_768',
+            'EMBED_TEXT_1024',
+            'PARSE_DOCUMENT',
+            'SPLIT_TEXT_RECURSIVE_CHARACTER',
+            'ANALYST_PREVIEW'
+        ];
+
+        return (
+            $schemaName === 'CORTEX' || 
+            $schemaName === 'SNOWFLAKE.CORTEX' || 
+            str_contains($resourceName, 'CORTEX') ||
+            in_array($resourceName, $knownCortexFunctions)
+        );
+    }
+
+    /**
+     * Filter parameter schemas to only include provided parameters
+     *
+     * @param array $paramSchemas
+     * @param array $in_params
+     * @return array
+     */
+    protected function filterProvidedParameters(array $paramSchemas, array $in_params)
+    {
+        // Get the names of provided parameters
+        $providedParamNames = [];
+        foreach ($in_params as $param) {
+            if (isset($param['name'])) {
+                $providedParamNames[] = strtolower($param['name']);
+            }
+        }
+
+        // Filter parameter schemas to only include those that match provided parameters
+        $filteredSchemas = [];
+        foreach ($paramSchemas as $key => $paramSchema) {
+            $paramName = strtolower($paramSchema->name);
+            if (in_array($paramName, $providedParamNames)) {
+                $filteredSchemas[$key] = $paramSchema;
+            }
+        }
+        return $filteredSchemas;
     }
 }
