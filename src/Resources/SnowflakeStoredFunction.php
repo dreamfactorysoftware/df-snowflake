@@ -63,7 +63,7 @@ class SnowflakeStoredFunction extends StoredFunction
                 $settings['quotedName'] = $this->parent->getSchema()->quoteTableName($schemaName) . '.' . $this->parent->getSchema()->quoteTableName($name);
             }
 
-            $function = new FunctionSchema($settings);
+            $function = new SnowflakeFunctionSchema($settings);
             
             // Load function parameters using the schema's getResource method
             $function = $this->parent->getSchema()->getResource(DbResourceTypes::TYPE_FUNCTION, $function);

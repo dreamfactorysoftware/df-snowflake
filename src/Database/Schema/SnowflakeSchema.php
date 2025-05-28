@@ -9,6 +9,7 @@ use DreamFactory\Core\Database\Schema\ProcedureSchema;
 use DreamFactory\Core\Database\Schema\FunctionSchema;
 use DreamFactory\Core\Database\Schema\RoutineSchema;
 use DreamFactory\Core\Database\Schema\TableSchema;
+use DreamFactory\Core\Snowflake\Database\Schema\SnowflakeFunctionSchema;
 use DreamFactory\Core\Enums\DbResourceTypes;
 use DreamFactory\Core\Enums\DbSimpleTypes;
 use DreamFactory\Core\Exceptions\InternalServerErrorException;
@@ -159,7 +160,7 @@ MYSQL;
             }
             $settings = compact('schemaName', 'resourceName', 'name', 'quotedName', 'internalName', 'returnType');
             $names[strtolower($name)] =
-                ('PROCEDURE' === $type) ? new ProcedureSchema($settings) : new FunctionSchema($settings);
+                ('PROCEDURE' === $type) ? new ProcedureSchema($settings) : new SnowflakeFunctionSchema($settings);
         }
         return $names;
     }
@@ -257,7 +258,10 @@ SQL;
             $type = 'PROCEDURE';
         } else $type = 'FUNCTION';
 
-        $dbNamePrefix = $holder->databaseName ? $this->quoteTableName($holder->databaseName) . '.' : '';
+        $dbNamePrefix = '';
+        if ($holder instanceof SnowflakeFunctionSchema && !empty($holder->databaseName)) {
+            $dbNamePrefix = $this->quoteTableName($holder->databaseName) . '.';
+        }
  
         $sql = <<<MYSQL
 SELECT * FROM {$dbNamePrefix}INFORMATION_SCHEMA.{$type}S WHERE {$type}_NAME = '{$holder->resourceName}' AND {$type}_SCHEMA = '{$holder->schemaName}'
@@ -301,7 +305,10 @@ MYSQL;
                  $returnDbType = Arr::get($row, 'DATA_TYPE');
                  if (!empty($returnDbType)) {
                      $holder->returnType = static::extractSimpleType($returnDbType);
-                     $holder->returnDbtype = $returnDbType;
+                     // Only set returnDbtype for SnowflakeFunctionSchema instances
+                     if ($holder instanceof SnowflakeFunctionSchema) {
+                         $holder->returnDbtype = $returnDbType;
+                     }
                  }
             }
         }
@@ -502,7 +509,7 @@ SQL;
         $paramStr = $this->getRoutineParamString($param_schemas, $values);
         
         $funcNameParts = [];
-        if (!empty($routine->databaseName)) {
+        if ($routine instanceof SnowflakeFunctionSchema && !empty($routine->databaseName)) {
             $funcNameParts[] = $this->quoteTableName($routine->databaseName);
         }
         if (!empty($routine->schemaName)) {
