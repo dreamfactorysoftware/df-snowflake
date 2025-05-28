@@ -3,6 +3,7 @@
 namespace DreamFactory\Core\Snowflake\Resources;
 
 use DreamFactory\Core\Database\Schema\FunctionSchema;
+use DreamFactory\Core\Snowflake\Database\Schema\SnowflakeFunctionSchema;
 use DreamFactory\Core\Enums\DbResourceTypes;
 use DreamFactory\Core\Exceptions\NotFoundException;
 use DreamFactory\Core\SqlDb\Resources\StoredFunction;
