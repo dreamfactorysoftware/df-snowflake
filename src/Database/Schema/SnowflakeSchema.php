@@ -19,6 +19,12 @@ use Arr;
 class SnowflakeSchema extends SqlSchema
 {
     /**
+     * Flag to indicate if we're currently processing function parameters that may need JSON encoding
+     * @var bool
+     */
+    protected $processingFunctionParameters = true;
+
+    /**
      * @inheritdoc
      */
     protected function getTableNames($schema = '')
@@ -324,7 +330,10 @@ MYSQL;
             \Log::info('Created dynamic parameter schemas for Cortex function: ' . json_encode($paramSchemas));
         }
 
+        // Set flag to enable Snowflake-specific processing in typecastToClient
+        $this->processingFunctionParameters = true;
         $values = $this->determineRoutineValues($paramSchemas, $in_params);
+        $this->processingFunctionParameters = false;
 
         $sql = $this->getFunctionStatement($function, $paramSchemas, $values);
 
@@ -482,50 +491,6 @@ SQL;
     }
 
     /**
-     * @param array $param_schemas
-     * @param array $in_params
-     *
-     * @return array
-     * @throws \DreamFactory\Core\Exceptions\BadRequestException
-     */
-    protected function determineRoutineValues(array $param_schemas, array $in_params)
-    {
-        $in_params = static::cleanParameters($param_schemas, $in_params);
-        $values = [];
-        $index = -1;
-        foreach ($param_schemas as $key => $paramSchema) {
-            $index++;
-            switch ($paramSchema->paramType) {
-                case 'IN':
-                case 'INOUT':
-                    if (array_key_exists($key, $in_params)) {
-                        $rawValue = $in_params[$key];
-                    } else {
-                        $rawValue = $paramSchema->defaultValue;
-                    }
-                    // For Snowflake, check if this parameter needs JSON encoding based on its type
-                    $dbTypeUpper = strtoupper($paramSchema->dbType ?? '');
-                    if (($dbTypeUpper === 'ARRAY' || $dbTypeUpper === 'OBJECT' || $dbTypeUpper === 'VARIANT') 
-                        && (is_array($rawValue) || is_object($rawValue))) {
-                        $values[$key] = json_encode($rawValue);
-                    } elseif (empty($paramSchema->dbType) && (is_array($rawValue) || is_object($rawValue))) {
-                        $values[$key] = json_encode($rawValue);
-                    } else {
-                        $values[$key] = $this->typecastToClient($rawValue, $paramSchema);
-                    }
-                    break;
-                case 'OUT':
-                    $values[$key] = null;
-                    break;
-                default:
-                    break;
-            }
-        }
-
-        return $values;
-    }
-
-    /**
      * @param \DreamFactory\Core\Database\Schema\RoutineSchema $routine
      * @param array                                            $param_schemas
      * @param array                                            $values
@@ -647,5 +612,25 @@ SQL;
         }
         
         return $paramSchemas;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function typecastToClient($value, $field_info, $allow_null = true)
+    {
+        // Apply Snowflake-specific JSON encoding for function parameters
+        if ($this->processingFunctionParameters && $field_info instanceof ParameterSchema) {
+            $dbTypeUpper = strtoupper($field_info->dbType ?? '');
+            if (($dbTypeUpper === 'ARRAY' || $dbTypeUpper === 'OBJECT' || $dbTypeUpper === 'VARIANT') 
+                && (is_array($value) || is_object($value))) {
+                return json_encode($value);
+            } elseif (empty($field_info->dbType) && (is_array($value) || is_object($value))) {
+                return json_encode($value);
+            }
+        }
+        
+        // Use parent implementation for all other cases
+        return parent::typecastToClient($value, $field_info, $allow_null);
     }
 }
