@@ -316,19 +316,20 @@ MYSQL;
 
         $paramSchemas = $function->getParameters();
         
-        // Filter parameter schemas to only include provided parameters for CORTEX functions
-        if ($this->isCortexFunction($function)) {
-            $paramSchemas = $this->filterProvidedParameters($paramSchemas, $in_params);
-        }
-
         \Log::info('Function Param Schemas: ' . json_encode($paramSchemas));
+
+        // Handle Cortex functions, since some provides multiple ways of specifing params
+        if ($this->isCortexFunction($function)) {
+            $paramSchemas = $this->createDynamicParameterSchemas($in_params);
+            \Log::info('Created dynamic parameter schemas for Cortex function: ' . json_encode($paramSchemas));
+        }
 
         $values = $this->determineRoutineValues($paramSchemas, $in_params);
 
-        \Log::info('Values: ' . json_encode($values));
         $sql = $this->getFunctionStatement($function, $paramSchemas, $values);
 
         \Log::info('SQL Query: ' . $sql);
+
         /** @type \PDOStatement $statement */
         if (!$statement = $this->connection->getPdo()->prepare($sql)) {
             throw new InternalServerErrorException('Failed to prepare statement: ' . $sql);
@@ -375,7 +376,6 @@ MYSQL;
 
         return $result;
     }
-
 
     /**
      * @inheritdoc
@@ -491,13 +491,10 @@ SQL;
     protected function determineRoutineValues(array $param_schemas, array $in_params)
     {
         $in_params = static::cleanParameters($param_schemas, $in_params);
-        
         $values = [];
         $index = -1;
-        // key is lowercase index
         foreach ($param_schemas as $key => $paramSchema) {
             $index++;
-            
             switch ($paramSchema->paramType) {
                 case 'IN':
                 case 'INOUT':
@@ -506,7 +503,6 @@ SQL;
                     } else {
                         $rawValue = $paramSchema->defaultValue;
                     }
-                    
                     // For Snowflake, check if this parameter needs JSON encoding based on its type
                     $dbTypeUpper = strtoupper($paramSchema->dbType ?? '');
                     if (($dbTypeUpper === 'ARRAY' || $dbTypeUpper === 'OBJECT' || $dbTypeUpper === 'VARIANT') 
@@ -555,7 +551,7 @@ SQL;
     }
 
     /**
-     * Check if this is a CORTEX function that needs parameter filtering
+     * Check if this is a CORTEX function
      *
      * @param FunctionSchema $function
      * @return bool
@@ -590,30 +586,66 @@ SQL;
     }
 
     /**
-     * Filter parameter schemas to only include provided parameters
+     * Create dynamic parameter schemas based on the input parameters provided
      *
-     * @param array $paramSchemas
      * @param array $in_params
      * @return array
      */
-    protected function filterProvidedParameters(array $paramSchemas, array $in_params)
+    protected function createDynamicParameterSchemas(array $in_params)
     {
-        // Get the names of provided parameters
-        $providedParamNames = [];
-        foreach ($in_params as $param) {
-            if (isset($param['name'])) {
-                $providedParamNames[] = strtolower($param['name']);
+        \Log::debug($in_params);
+        $paramSchemas = [];
+        $position = 1;
+        
+        foreach ($in_params as $key => $param) {
+            $paramName = '';
+            $paramValue = null;
+            
+            // Handle different parameter formats
+            if (is_array($param)) {
+                // Format: [['name' => 'param1', 'value' => 'value1'], ...]
+                $paramName = array_get($param, 'name', 'param' . $position);
+                $paramValue = array_get($param, 'value');
+            } else {
+                // Format: ['param1' => 'value1', 'param2' => 'value2', ...]
+                $paramName = is_string($key) ? $key : 'param' . $position;
+                $paramValue = $param;
             }
-        }
-
-        // Filter parameter schemas to only include those that match provided parameters
-        $filteredSchemas = [];
-        foreach ($paramSchemas as $key => $paramSchema) {
-            $paramName = strtolower($paramSchema->name);
-            if (in_array($paramName, $providedParamNames)) {
-                $filteredSchemas[$key] = $paramSchema;
+            
+            // Determine parameter type based on value
+            $paramType = 'string'; // default
+            $dbType = 'VARCHAR';
+            
+            if (is_numeric($paramValue)) {
+                if (is_int($paramValue) || ctype_digit($paramValue)) {
+                    $paramType = 'integer';
+                    $dbType = 'NUMBER';
+                } else {
+                    $paramType = 'float';
+                    $dbType = 'FLOAT';
+                }
+            } elseif (is_bool($paramValue)) {
+                $paramType = 'boolean';
+                $dbType = 'BOOLEAN';
+            } elseif (is_array($paramValue) || is_object($paramValue)) {
+                $paramType = 'string'; // Will be JSON encoded
+                $dbType = 'VARIANT';
             }
+            
+            $paramSchemas[strtolower($paramName)] = new ParameterSchema([
+                'name' => $paramName,
+                'position' => $position,
+                'param_type' => 'IN',
+                'type' => $paramType,
+                'db_type' => $dbType,
+                'length' => null,
+                'precision' => null,
+                'scale' => null,
+            ]);
+            
+            $position++;
         }
-        return $filteredSchemas;
+        
+        return $paramSchemas;
     }
 }
