@@ -3,11 +3,11 @@
 namespace DreamFactory\Core\Snowflake\Services;
 
 use DreamFactory\Core\Snowflake\Resources\SnowflakeSchemaResource;
+use DreamFactory\Core\Snowflake\Resources\SnowflakeStoredFunction;
 use DreamFactory\Core\Snowflake\Resources\SnowflakeTable as Table;
-use DreamFactory\Core\Exceptions\InternalServerErrorException;
-use DreamFactory\Core\Resources\BaseRestResource;
 use DreamFactory\Core\SqlDb\Services\SqlDb;
 use DreamFactory\Core\SqlDb\Resources\StoredProcedure;
+use DreamFactory\Core\SqlDb\Resources\StoredFunction;
 use Arr;
 
 /**
@@ -230,6 +230,19 @@ class SnowflakeDb extends SqlDb
                 ];
                 $paths[$pkey]['get']['parameters'] = array_merge($paths[$pkey]['get']['parameters'], $newParams);
             }
+            
+            if (strpos($pkey, '/_func/') !== false) {
+                if (isset($path['post']['parameters'])) {
+                    $path['post']['parameters'][] = $this->getHeaderPram('X-Database-Name', 'Database name for cross-database function calls');
+                    $path['post']['parameters'][] = $this->getHeaderPram('X-Schema-Name', 'Schema name for function calls');
+                } else if (isset($path['post'])) {
+                    $path['post']['parameters'] = [
+                        $this->getHeaderPram('X-Database-Name', 'Database name for cross-database function calls'),
+                        $this->getHeaderPram('X-Schema-Name', 'Schema name for function calls')
+                    ];
+                }
+                $paths[$pkey] = $path;
+            }
         }
         $base['paths'] = $paths;
 
@@ -263,14 +276,20 @@ class SnowflakeDb extends SqlDb
             'label'      => 'Stored Procedure',
         ];
 
+        $handlers[StoredFunction::RESOURCE_NAME] = [
+            'name'       => StoredFunction::RESOURCE_NAME,
+            'class_name' => SnowflakeStoredFunction::class,
+            'label'      => 'Stored Function',
+        ];
+
         return $handlers;
     }
 
-    private function getHeaderPram($name): array
+    private function getHeaderPram($name, $description = null): array
     {
         return [
             "name" => $name,
-            "description" => ucfirst($name) . " for database connection.",
+            "description" => $description ?: ucfirst($name) . " for database connection.",
             "schema" => [
                 "type" => "string"
             ],
