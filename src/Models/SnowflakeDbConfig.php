@@ -11,7 +11,7 @@ use DreamFactory\Core\SqlDb\Models\BaseSqlDbConfig;
  */
 class SnowflakeDbConfig extends BaseSqlDbConfig
 {
-    protected $appends = ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role'];
+    protected $appends = ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role', 'private_link_enabled', 'region'];
 
     protected $encrypted = ['username', 'password', 'key', 'passcode'];
 
@@ -19,7 +19,7 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
 
     protected function getConnectionFields()
     {
-        return ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role'];
+        return ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role', 'private_link_enabled', 'region'];
     }
 
     public static function getDriverName()
@@ -95,6 +95,20 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'type' => 'string',
                 'description' => 'Leave blank to work with the default schema ' .
                     'or type in a specific schema to use for this service.'
+            ],
+            [
+                'name' => 'private_link_enabled',
+                'label' => 'Enable Private Link',
+                'type' => 'boolean',
+                'description' => 'Enable this option if you are connecting through Snowflake Private Link. ' .
+                    'This helps optimize the connection configuration for private endpoints.'
+            ],
+            [
+                'name' => 'region',
+                'label' => 'Region',
+                'type' => 'string',
+                'description' => 'Specify the region for private link connections (e.g., us-east-1, eu-west-1). ' .
+                    'This field is optional but recommended for private link configurations.'
             ]
         ];
         return $defaults;

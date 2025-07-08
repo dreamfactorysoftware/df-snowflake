@@ -73,6 +73,8 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
         $this->substituteConfig('key', 'header', $config);
         $this->substituteConfig('passcode', 'header', $config);
         $this->substituteConfig('role', 'header', $config);
+        $this->substituteConfig('private_link_enabled', 'header', $config);
+        $this->substituteConfig('region', 'header', $config);
     }
 
     protected function checkUrlParams(&$config)
@@ -87,6 +89,8 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
         $this->substituteConfig('key', 'header', $config);
         $this->substituteConfig('passcode', 'header', $config);
         $this->substituteConfig('role', 'url', $config);
+        $this->substituteConfig('private_link_enabled', 'url', $config);
+        $this->substituteConfig('region', 'url', $config);
     }
 
     protected function substituteConfig($name, $parameter, &$config)
