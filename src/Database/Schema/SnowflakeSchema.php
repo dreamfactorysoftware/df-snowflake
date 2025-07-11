@@ -9,14 +9,22 @@ use DreamFactory\Core\Database\Schema\ProcedureSchema;
 use DreamFactory\Core\Database\Schema\FunctionSchema;
 use DreamFactory\Core\Database\Schema\RoutineSchema;
 use DreamFactory\Core\Database\Schema\TableSchema;
+use DreamFactory\Core\Snowflake\Database\Schema\SnowflakeFunctionSchema;
 use DreamFactory\Core\Enums\DbResourceTypes;
 use DreamFactory\Core\Enums\DbSimpleTypes;
 use DreamFactory\Core\Exceptions\InternalServerErrorException;
 use DreamFactory\Core\SqlDb\Database\Schema\SqlSchema;
+use DreamFactory\Core\Exceptions\BadRequestException;
 use Arr;
 
 class SnowflakeSchema extends SqlSchema
 {
+    /**
+     * Flag to indicate if we're currently processing function parameters that may need JSON encoding
+     * @var bool
+     */
+    protected $processingFunctionParameters = true;
+
     /**
      * @inheritdoc
      */
@@ -106,15 +114,21 @@ class SnowflakeSchema extends SqlSchema
      */
     protected function getRoutineParamString(array $param_schemas, array &$values)
     {
-        $paramStr = '';
+        $paramParts = [];
         foreach ($param_schemas as $key => $paramSchema) {
-            if (!empty($values[strtolower($paramSchema->name)])) {
-                $pName = ':' . $paramSchema->name;
-                $paramStr .= (empty($paramStr)) ? $pName : ", $pName";
+            $paramTypeUpper = strtoupper($paramSchema->paramType);
+            if ($paramTypeUpper === 'IN' || $paramTypeUpper === 'INOUT') {
+                $placeholder = ':' . $paramSchema->name;
+
+                $dbTypeUpper = strtoupper($paramSchema->dbType);
+                if ($dbTypeUpper === 'ARRAY' || $dbTypeUpper === 'OBJECT' || $dbTypeUpper === 'VARIANT') {
+                    $paramParts[] = 'PARSE_JSON(' . $placeholder . ')';
+                } else {
+                    $paramParts[] = $placeholder;
+                }
             }
         }
-
-        return $paramStr;
+        return implode(', ', $paramParts);
     }
 
     /**
@@ -146,7 +160,7 @@ MYSQL;
             }
             $settings = compact('schemaName', 'resourceName', 'name', 'quotedName', 'internalName', 'returnType');
             $names[strtolower($name)] =
-                ('PROCEDURE' === $type) ? new ProcedureSchema($settings) : new FunctionSchema($settings);
+                ('PROCEDURE' === $type) ? new ProcedureSchema($settings) : new SnowflakeFunctionSchema($settings);
         }
         return $names;
     }
@@ -244,13 +258,17 @@ SQL;
             $type = 'PROCEDURE';
         } else $type = 'FUNCTION';
 
-
+        $dbNamePrefix = '';
+        if ($holder instanceof SnowflakeFunctionSchema && !empty($holder->databaseName)) {
+            $dbNamePrefix = $this->quoteTableName($holder->databaseName) . '.';
+        }
+ 
         $sql = <<<MYSQL
-SELECT * FROM INFORMATION_SCHEMA.{$type}S WHERE {$type}_NAME = '{$holder->resourceName}' AND {$type}_SCHEMA = '{$holder->schemaName}'
+SELECT * FROM {$dbNamePrefix}INFORMATION_SCHEMA.{$type}S WHERE {$type}_NAME = '{$holder->resourceName}' AND {$type}_SCHEMA = '{$holder->schemaName}'
 MYSQL;
 
         $bindings = [':object' => $type, ':schema' => $holder->schemaName];
-
+ 
         $rows = $this->connection->select($sql, $bindings);
         foreach ($rows as $row) {
             $row = array_change_key_case((array)$row, CASE_UPPER);
@@ -283,9 +301,18 @@ MYSQL;
                     ));
                 }
             }
+            if ($type === 'FUNCTION' && empty($arguments) && empty($holder->returnType)){
+                 $returnDbType = Arr::get($row, 'DATA_TYPE');
+                 if (!empty($returnDbType)) {
+                     $holder->returnType = static::extractSimpleType($returnDbType);
+                     // Only set returnDbtype for SnowflakeFunctionSchema instances
+                     if ($holder instanceof SnowflakeFunctionSchema) {
+                         $holder->returnDbtype = $returnDbType;
+                     }
+                 }
+            }
         }
     }
-
 
     /**
      * @param FunctionSchema $function
@@ -301,15 +328,29 @@ MYSQL;
         }
 
         $paramSchemas = $function->getParameters();
+        
+        \Log::info('Function Param Schemas: ' . json_encode($paramSchemas));
+
+        // Handle Cortex functions, since some provides multiple ways of specifing params
+        if ($this->isCortexFunction($function)) {
+            $paramSchemas = $this->createDynamicParameterSchemas($in_params);
+            \Log::info('Created dynamic parameter schemas for Cortex function: ' . json_encode($paramSchemas));
+        }
+
+        // Set flag to enable Snowflake-specific processing in typecastToClient
+        $this->processingFunctionParameters = true;
         $values = $this->determineRoutineValues($paramSchemas, $in_params);
+        $this->processingFunctionParameters = false;
 
         $sql = $this->getFunctionStatement($function, $paramSchemas, $values);
+
+        \Log::info('SQL Query: ' . $sql);
+
         /** @type \PDOStatement $statement */
         if (!$statement = $this->connection->getPdo()->prepare($sql)) {
             throw new InternalServerErrorException('Failed to prepare statement: ' . $sql);
         }
 
-        // do binding
         $this->doRoutineBinding($statement, $paramSchemas, $values);
 
         // support multiple result sets
@@ -351,7 +392,6 @@ MYSQL;
 
         return $result;
     }
-
 
     /**
      * @inheritdoc
@@ -457,4 +497,147 @@ SQL;
         return $constraints;
     }
 
+    /**
+     * @param \DreamFactory\Core\Database\Schema\RoutineSchema $routine
+     * @param array                                            $param_schemas
+     * @param array                                            $values
+     *
+     * @return string
+     */
+    protected function getFunctionStatement(RoutineSchema $routine, array $param_schemas, array &$values)
+    {
+        $paramStr = $this->getRoutineParamString($param_schemas, $values);
+        
+        $funcNameParts = [];
+        if ($routine instanceof SnowflakeFunctionSchema && !empty($routine->databaseName)) {
+            $funcNameParts[] = $this->quoteTableName($routine->databaseName);
+        }
+        if (!empty($routine->schemaName)) {
+            $funcNameParts[] = $this->quoteTableName($routine->schemaName);
+        }
+        $funcNameParts[] = $this->quoteTableName($routine->resourceName);
+        
+        $fullyQualifiedQuotedFuncName = implode('.', $funcNameParts);
+
+        return "SELECT {$fullyQualifiedQuotedFuncName}($paramStr) AS " . $this->quoteColumnName('output');
+    }
+
+    /**
+     * Check if this is a CORTEX function
+     *
+     * @param FunctionSchema $function
+     * @return bool
+     */
+    protected function isCortexFunction($function)
+    {
+        $schemaName = isset($function->schemaName) ? strtoupper($function->schemaName) : '';
+        $resourceName = isset($function->resourceName) ? strtoupper($function->resourceName) : '';
+
+        // List of known Cortex functions (extend if needed)
+        $knownCortexFunctions = [
+            'COMPLETE',
+            'CLASSIFY_TEXT',
+            'EXTRACT_ANSWER',
+            'SENTIMENT',
+            'SUMMARIZE',
+            'TRANSLATE',
+            'EMBED_TEXT',
+            'EMBED_TEXT_768',
+            'EMBED_TEXT_1024',
+            'PARSE_DOCUMENT',
+            'SPLIT_TEXT_RECURSIVE_CHARACTER',
+            'ANALYST_PREVIEW'
+        ];
+
+        return (
+            $schemaName === 'CORTEX' || 
+            $schemaName === 'SNOWFLAKE.CORTEX' || 
+            str_contains($resourceName, 'CORTEX') ||
+            in_array($resourceName, $knownCortexFunctions)
+        );
+    }
+
+    /**
+     * Create dynamic parameter schemas based on the input parameters provided
+     *
+     * @param array $in_params
+     * @return array
+     */
+    protected function createDynamicParameterSchemas(array $in_params)
+    {
+        \Log::debug($in_params);
+        $paramSchemas = [];
+        $position = 1;
+        
+        foreach ($in_params as $key => $param) {
+            $paramName = '';
+            $paramValue = null;
+            
+            // Handle different parameter formats
+            if (is_array($param)) {
+                // Format: [['name' => 'param1', 'value' => 'value1'], ...]
+                $paramName = array_get($param, 'name', 'param' . $position);
+                $paramValue = array_get($param, 'value');
+            } else {
+                // Format: ['param1' => 'value1', 'param2' => 'value2', ...]
+                $paramName = is_string($key) ? $key : 'param' . $position;
+                $paramValue = $param;
+            }
+            
+            // Determine parameter type based on value
+            $paramType = 'string'; // default
+            $dbType = 'VARCHAR';
+            
+            if (is_numeric($paramValue)) {
+                if (is_int($paramValue) || ctype_digit($paramValue)) {
+                    $paramType = 'integer';
+                    $dbType = 'NUMBER';
+                } else {
+                    $paramType = 'float';
+                    $dbType = 'FLOAT';
+                }
+            } elseif (is_bool($paramValue)) {
+                $paramType = 'boolean';
+                $dbType = 'BOOLEAN';
+            } elseif (is_array($paramValue) || is_object($paramValue)) {
+                $paramType = 'string'; // Will be JSON encoded
+                $dbType = 'VARIANT';
+            }
+            
+            $paramSchemas[strtolower($paramName)] = new ParameterSchema([
+                'name' => $paramName,
+                'position' => $position,
+                'param_type' => 'IN',
+                'type' => $paramType,
+                'db_type' => $dbType,
+                'length' => null,
+                'precision' => null,
+                'scale' => null,
+            ]);
+            
+            $position++;
+        }
+        
+        return $paramSchemas;
+    }
+
+    /**
+     * @inheritdoc
+     */
+    public function typecastToClient($value, $field_info, $allow_null = true)
+    {
+        // Apply Snowflake-specific JSON encoding for function parameters
+        if ($this->processingFunctionParameters && $field_info instanceof ParameterSchema) {
+            $dbTypeUpper = strtoupper($field_info->dbType ?? '');
+            if (($dbTypeUpper === 'ARRAY' || $dbTypeUpper === 'OBJECT' || $dbTypeUpper === 'VARIANT') 
+                && (is_array($value) || is_object($value))) {
+                return json_encode($value);
+            } elseif (empty($field_info->dbType) && (is_array($value) || is_object($value))) {
+                return json_encode($value);
+            }
+        }
+        
+        // Use parent implementation for all other cases
+        return parent::typecastToClient($value, $field_info, $allow_null);
+    }
 }
