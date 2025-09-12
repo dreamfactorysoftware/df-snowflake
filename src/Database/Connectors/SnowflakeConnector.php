@@ -6,6 +6,7 @@ use DreamFactory\Core\Snowflake\Database\Schema\SnowflakeSchema;
 use Illuminate\Database\Connectors\Connector;
 use Illuminate\Database\Connectors\ConnectorInterface;
 use PDO;
+use Exception;
 
 class SnowflakeConnector extends Connector implements ConnectorInterface
 {
@@ -34,14 +35,28 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         ];
 
         try {
-            if ($password === null && $config['key'] !== null) {
-                return $this->createConnectionWithKeyPairAuth(
-                    $dsn, $username, $config, $options
-                );
+            $authMethod = $config['authentication_method'] ?? 'password';
+            
+            switch ($authMethod) {
+                case 'oauth':
+                    return $this->createConnectionWithOAuth(
+                        $dsn, $username, $config, $options
+                    );
+                case 'key_pair':
+                    return $this->createConnectionWithKeyPairAuth(
+                        $dsn, $username, $config, $options
+                    );
+                default:
+                    // Legacy behavior: if no password and key exists, use key pair auth
+                    if ($password === null && $config['key'] !== null) {
+                        return $this->createConnectionWithKeyPairAuth(
+                            $dsn, $username, $config, $options
+                        );
+                    }
+                    return $this->createPdoConnection(
+                        $dsn, $username, $password, $options
+                    );
             }
-            return $this->createPdoConnection(
-                $dsn, $username, $password, $options
-            );
         } catch (Exception $e) {
             return $this->tryAgainIfCausedByLostConnection(
                 $e, $dsn, $username, $password, $options
@@ -70,6 +85,60 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             // Log detailed error for easier debugging of key pair auth issues
             \Log::error('Snowflake key pair authentication error: ' . $e->getMessage());
             throw $e;
+        }
+    }
+
+    protected function createConnectionWithOAuth($dsn, $username, $config, $options)
+    {
+        try {
+            $tokenPath = $config['oauth_token_path'] ?? '/snowflake/session/token';
+            
+            if (!file_exists($tokenPath)) {
+                throw new \InvalidArgumentException(
+                    "OAuth token file not found at: {$tokenPath}. " .
+                    "This authentication method is only available in Snowflake Native App environments."
+                );
+            }
+
+            if (!is_readable($tokenPath)) {
+                throw new \InvalidArgumentException(
+                    "OAuth token file is not readable at: {$tokenPath}. Check file permissions."
+                );
+            }
+
+            $token = trim(file_get_contents($tokenPath));
+            
+            if (empty($token)) {
+                throw new \InvalidArgumentException(
+                    "OAuth token file is empty at: {$tokenPath}. Token may have expired or not been generated yet."
+                );
+            }
+
+            // For OAuth authentication, we use the token instead of password
+            // The DSN already includes authenticator=oauth parameter
+            $pdo = new PDO($dsn, $username ?: '', '');
+            
+            // Apply any PDO options
+            foreach ($options as $key => $value) {
+                $this->setConnectionAttribute($pdo, $key, $value);
+            }
+            
+            // Set the OAuth token as a connection attribute if supported by the driver
+            try {
+                $pdo->setAttribute(PDO::ATTR_AUTOCOMMIT, true);
+            } catch (\PDOException $e) {
+                // Ignore if not supported
+            }
+            
+            return $pdo;
+            
+        } catch (\PDOException $e) {
+            \Log::error('Snowflake OAuth authentication error: ' . $e->getMessage());
+            throw new \InvalidArgumentException(
+                'Failed to authenticate with OAuth token. ' .
+                'Ensure you are running in a Snowflake Native App environment and the token is valid. ' .
+                'Error: ' . $e->getMessage()
+            );
         }
     }
 
@@ -169,8 +238,24 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             $dsn .= "role={$role};";
         }
 
-        // Set up key pair authentication if a key is provided
-        if (!empty($key)) {
+        // Set up authentication based on method
+        $authMethod = $config['authentication_method'] ?? 'password';
+        
+        if ($authMethod === 'oauth') {
+            // OAuth authentication for Native Apps
+            $dsn .= "authenticator=oauth;";
+            
+            // Read OAuth token
+            $tokenPath = $config['oauth_token_path'] ?? '/snowflake/session/token';
+            if (file_exists($tokenPath) && is_readable($tokenPath)) {
+                $token = trim(file_get_contents($tokenPath));
+                if (!empty($token)) {
+                    $escapedToken = $this->escapeDsnValue($token);
+                    $dsn .= "token={$escapedToken};";
+                }
+            }
+        } elseif (($authMethod === 'key_pair') || (!empty($key) && $authMethod !== 'password')) {
+            // Set up key pair authentication if a key is provided
             // Use JWT authentication with Snowflake
             $dsn .= "authenticator=SNOWFLAKE_JWT;";
             

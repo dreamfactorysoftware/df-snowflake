@@ -29,6 +29,9 @@ class SnowflakeDb extends SqlDb
     {
         $config['driver'] = 'snowflake';
         
+        // Auto-detect OAuth environment and set default configuration
+        static::detectAndConfigureOAuthEnvironment($config);
+        
         // Handle key file upload if provided
         if (!empty($config['key']) && is_array($config['key']) && !empty($config['key']['tmp_name'])) {
             $keyFile = $config['key'];
@@ -202,6 +205,63 @@ class SnowflakeDb extends SqlDb
         return false;
     }
 
+    /**
+     * Detect if running in a Snowflake Native App environment and configure OAuth settings
+     * 
+     * @param array $config Configuration array to modify
+     * @return void
+     */
+    protected static function detectAndConfigureOAuthEnvironment(array &$config)
+    {
+        // Check if we're in a Snowflake Native App environment
+        $defaultTokenPath = '/snowflake/session/token';
+        $isNativeAppEnvironment = file_exists($defaultTokenPath);
+        
+        // If no authentication method is explicitly set and we're in a native app environment,
+        // suggest OAuth authentication
+        if ($isNativeAppEnvironment && empty($config['authentication_method'])) {
+            \Log::info('Detected Snowflake Native App environment, OAuth token available at: ' . $defaultTokenPath);
+            
+            // Auto-configure OAuth settings from environment variables if available
+            if (empty($config['account']) && !empty($_ENV['SNOWFLAKE_ACCOUNT'])) {
+                $config['account'] = $_ENV['SNOWFLAKE_ACCOUNT'];
+                \Log::info('Auto-configured Snowflake account from SNOWFLAKE_ACCOUNT environment variable');
+            }
+            
+            if (empty($config['hostname']) && !empty($_ENV['SNOWFLAKE_HOST'])) {
+                $config['hostname'] = $_ENV['SNOWFLAKE_HOST'];
+                \Log::info('Auto-configured Snowflake hostname from SNOWFLAKE_HOST environment variable');
+            }
+            
+            if (empty($config['database']) && !empty($_ENV['SNOWFLAKE_DATABASE'])) {
+                $config['database'] = $_ENV['SNOWFLAKE_DATABASE'];
+                \Log::info('Auto-configured Snowflake database from SNOWFLAKE_DATABASE environment variable');
+            }
+            
+            if (empty($config['warehouse']) && !empty($_ENV['SNOWFLAKE_WAREHOUSE'])) {
+                $config['warehouse'] = $_ENV['SNOWFLAKE_WAREHOUSE'];
+                \Log::info('Auto-configured Snowflake warehouse from SNOWFLAKE_WAREHOUSE environment variable');
+            }
+            
+            if (empty($config['schema']) && !empty($_ENV['SNOWFLAKE_SCHEMA'])) {
+                $config['schema'] = $_ENV['SNOWFLAKE_SCHEMA'];
+                \Log::info('Auto-configured Snowflake schema from SNOWFLAKE_SCHEMA environment variable');
+            }
+            
+            // Set OAuth token path if not already configured
+            if (empty($config['oauth_token_path'])) {
+                $config['oauth_token_path'] = $defaultTokenPath;
+            }
+        }
+        
+        // Log environment detection result
+        if ($isNativeAppEnvironment) {
+            \Log::info('Snowflake Native App environment detected - OAuth authentication is available');
+        } else {
+            \Log::debug('Standard Snowflake environment - using traditional authentication methods');
+        }
+    }
+
     public function getApiDocInfo()
     {
         $base = parent::getApiDocInfo();
@@ -226,7 +286,9 @@ class SnowflakeDb extends SqlDb
                     $this->getHeaderPram('role'),
                     $this->getHeaderPram('database'),
                     $this->getHeaderPram('warehouse'),
-                    $this->getHeaderPram('schema')
+                    $this->getHeaderPram('schema'),
+                    $this->getHeaderPram('authentication_method', 'Authentication method (password, key_pair, oauth)'),
+                    $this->getHeaderPram('oauth_token_path', 'Path to OAuth token file for Native App environments')
                 ];
                 $paths[$pkey]['get']['parameters'] = array_merge($paths[$pkey]['get']['parameters'], $newParams);
             }

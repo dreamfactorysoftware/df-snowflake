@@ -11,7 +11,7 @@ use DreamFactory\Core\SqlDb\Models\BaseSqlDbConfig;
  */
 class SnowflakeDbConfig extends BaseSqlDbConfig
 {
-    protected $appends = ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role'];
+    protected $appends = ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role', 'authentication_method', 'oauth_token_path'];
 
     protected $encrypted = ['username', 'password', 'key', 'passcode'];
 
@@ -19,7 +19,7 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
 
     protected function getConnectionFields()
     {
-        return ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role'];
+        return ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role', 'authentication_method', 'oauth_token_path'];
     }
 
     public static function getDriverName()
@@ -95,6 +95,25 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'type' => 'string',
                 'description' => 'Leave blank to work with the default schema ' .
                     'or type in a specific schema to use for this service.'
+            ],
+            [
+                'name' => 'authentication_method',
+                'label' => 'Authentication Method',
+                'type' => 'picklist',
+                'values' => [
+                    ['label' => 'Username/Password', 'name' => 'password'],
+                    ['label' => 'Key Pair Authentication', 'name' => 'key_pair'],
+                    ['label' => 'Native App OAuth', 'name' => 'oauth']
+                ],
+                'default' => 'password',
+                'description' => 'Choose the authentication method for connecting to Snowflake.'
+            ],
+            [
+                'name' => 'oauth_token_path',
+                'label' => 'OAuth Token Path',
+                'type' => 'string',
+                'default' => '/snowflake/session/token',
+                'description' => 'Path to the Snowflake-provided OAuth token file (for Native App environments only).'
             ]
         ];
         return $defaults;
