@@ -214,13 +214,33 @@ class SnowflakeDb extends SqlDb
     protected static function detectAndConfigureOAuthEnvironment(array &$config)
     {
         // Check if we're in a Snowflake Native App environment
+        $possibleTokenPaths = [
+            '/snowflake/session/token',
+            '/snowflake/session/oauth',
+            '/snowflake/oauth/token'
+        ];
+        
         $defaultTokenPath = '/snowflake/session/token';
-        $isNativeAppEnvironment = file_exists($defaultTokenPath);
+        $isNativeAppEnvironment = false;
+        $foundTokenPath = null;
+        
+        foreach ($possibleTokenPaths as $path) {
+            \Log::info("Environment Detection - Checking path: {$path} - " . (file_exists($path) ? 'EXISTS' : 'NOT_FOUND'));
+            if (file_exists($path)) {
+                $isNativeAppEnvironment = true;
+                $foundTokenPath = $path;
+                if ($path !== $defaultTokenPath) {
+                    \Log::info("Environment Detection - Found token at alternative path: {$path}");
+                    $config['oauth_token_path'] = $path; // Update config with correct path
+                }
+                break;
+            }
+        }
         
         // If no authentication method is explicitly set and we're in a native app environment,
         // suggest OAuth authentication
         if ($isNativeAppEnvironment && empty($config['authentication_method'])) {
-            \Log::info('Detected Snowflake Native App environment, OAuth token available at: ' . $defaultTokenPath);
+            \Log::info('Detected Snowflake Native App environment, OAuth token available at: ' . $foundTokenPath);
             
             // Auto-configure OAuth settings from environment variables if available
             if (empty($config['account']) && !empty($_ENV['SNOWFLAKE_ACCOUNT'])) {

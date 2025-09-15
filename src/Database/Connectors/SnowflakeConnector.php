@@ -93,20 +93,48 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         try {
             $tokenPath = $config['oauth_token_path'] ?? '/snowflake/session/token';
             
+            // DIAGNOSTIC LOGGING
+            \Log::info("OAuth Debug - Token path: {$tokenPath}");
+            \Log::info("OAuth Debug - File exists: " . (file_exists($tokenPath) ? 'YES' : 'NO'));
+            
+            // Check alternative token paths
+            $possiblePaths = [
+                '/snowflake/session/token',
+                '/snowflake/session/oauth',
+                '/snowflake/oauth/token'
+            ];
+            
+            foreach ($possiblePaths as $path) {
+                \Log::info("Checking OAuth path: {$path} - " . (file_exists($path) ? 'EXISTS' : 'NOT_FOUND'));
+                if (file_exists($path) && $path !== $tokenPath) {
+                    \Log::info("Alternative token path found: {$path}");
+                }
+            }
+            
             if (!file_exists($tokenPath)) {
-                throw new \InvalidArgumentException(
-                    "OAuth token file not found at: {$tokenPath}. " .
-                    "This authentication method is only available in Snowflake Native App environments."
-                );
-            }
+                // Check environment variables as fallback
+                $envToken = $_ENV['SNOWFLAKE_OAUTH_TOKEN'] ?? getenv('SNOWFLAKE_OAUTH_TOKEN');
+                if ($envToken) {
+                    \Log::info("OAuth Debug - Using token from environment variable");
+                    $token = $envToken;
+                } else {
+                    \Log::error("OAuth Debug - No token found in file or environment");
+                    throw new \InvalidArgumentException(
+                        "OAuth token file not found at: {$tokenPath}. " .
+                        "This authentication method is only available in Snowflake Native App environments."
+                    );
+                }
+            } else {
+                if (!is_readable($tokenPath)) {
+                    throw new \InvalidArgumentException(
+                        "OAuth token file is not readable at: {$tokenPath}. Check file permissions."
+                    );
+                }
 
-            if (!is_readable($tokenPath)) {
-                throw new \InvalidArgumentException(
-                    "OAuth token file is not readable at: {$tokenPath}. Check file permissions."
-                );
+                $token = trim(file_get_contents($tokenPath));
+                \Log::info("OAuth Debug - Token length: " . strlen($token));
+                \Log::info("OAuth Debug - Token preview: " . substr($token, 0, 20) . '...');
             }
-
-            $token = trim(file_get_contents($tokenPath));
             
             if (empty($token)) {
                 throw new \InvalidArgumentException(
@@ -114,26 +142,28 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
                 );
             }
 
-            // For OAuth authentication, we use the token instead of password
-            // The DSN already includes authenticator=oauth parameter
-            $pdo = new PDO($dsn, $username ?: '', '');
+            \Log::info("OAuth Debug - DSN: " . $dsn);
+
+            // Pass token as PDO option instead of in DSN (like Python approach)
+            $authOptions = array_merge($options, [
+                'token' => $token,
+                'authenticator' => 'oauth'
+            ]);
+
+            \Log::info("OAuth Debug - Attempting PDO connection with token as option");
+            $pdo = new PDO($dsn, $username ?: '', '', $authOptions);
             
-            // Apply any PDO options
+            // Apply any remaining PDO options
             foreach ($options as $key => $value) {
                 $this->setConnectionAttribute($pdo, $key, $value);
             }
             
-            // Set the OAuth token as a connection attribute if supported by the driver
-            try {
-                $pdo->setAttribute(PDO::ATTR_AUTOCOMMIT, true);
-            } catch (\PDOException $e) {
-                // Ignore if not supported
-            }
-            
+            \Log::info("OAuth Debug - PDO connection successful");
             return $pdo;
             
         } catch (\PDOException $e) {
             \Log::error('Snowflake OAuth authentication error: ' . $e->getMessage());
+            \Log::error('OAuth Debug - PDO connection failed with token as option');
             throw new \InvalidArgumentException(
                 'Failed to authenticate with OAuth token. ' .
                 'Ensure you are running in a Snowflake Native App environment and the token is valid. ' .
@@ -244,16 +274,7 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         if ($authMethod === 'oauth') {
             // OAuth authentication for Native Apps
             $dsn .= "authenticator=oauth;";
-            
-            // Read OAuth token
-            $tokenPath = $config['oauth_token_path'] ?? '/snowflake/session/token';
-            if (file_exists($tokenPath) && is_readable($tokenPath)) {
-                $token = trim(file_get_contents($tokenPath));
-                if (!empty($token)) {
-                    $escapedToken = $this->escapeDsnValue($token);
-                    $dsn .= "token={$escapedToken};";
-                }
-            }
+            // Note: Token is now passed as PDO option, not in DSN
         } elseif (($authMethod === 'key_pair') || (!empty($key) && $authMethod !== 'password')) {
             // Set up key pair authentication if a key is provided
             // Use JWT authentication with Snowflake
