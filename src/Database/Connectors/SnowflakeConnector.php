@@ -144,22 +144,50 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
 
             \Log::info("OAuth Debug - DSN: " . $dsn);
 
-            // Pass token as PDO option instead of in DSN (like Python approach)
-            $authOptions = array_merge($options, [
-                'token' => $token,
-                'authenticator' => 'oauth'
-            ]);
-
-            \Log::info("OAuth Debug - Attempting PDO connection with token as option");
-            $pdo = new PDO($dsn, $username ?: '', '', $authOptions);
-            
-            // Apply any remaining PDO options
-            foreach ($options as $key => $value) {
-                $this->setConnectionAttribute($pdo, $key, $value);
+            // Try multiple OAuth token passing methods
+            \Log::info("OAuth Debug - Method 1: Attempting PDO connection with token as password");
+            try {
+                // Method 1: Pass token as password parameter (most common for OAuth)
+                $pdo = new PDO($dsn, $username ?: '', $token, $options);
+                \Log::info("OAuth Debug - Method 1 successful: token as password");
+                return $pdo;
+            } catch (\PDOException $e1) {
+                \Log::error("OAuth Debug - Method 1 failed: " . $e1->getMessage());
+                
+                // Method 2: Pass token as PDO option
+                \Log::info("OAuth Debug - Method 2: Attempting PDO connection with token as option");
+                try {
+                    $authOptions = array_merge($options, [
+                        'token' => $token,
+                        'authenticator' => 'oauth'
+                    ]);
+                    $pdo = new PDO($dsn, $username ?: '', '', $authOptions);
+                    \Log::info("OAuth Debug - Method 2 successful: token as option");
+                    return $pdo;
+                } catch (\PDOException $e2) {
+                    \Log::error("OAuth Debug - Method 2 failed: " . $e2->getMessage());
+                    
+                    // Method 3: Try with token in DSN (fallback to original approach)
+                    \Log::info("OAuth Debug - Method 3: Attempting with token in DSN");
+                    $dsnWithToken = $dsn;
+                    if (strpos($dsnWithToken, 'token=') === false) {
+                        $escapedToken = $this->escapeDsnValue($token);
+                        $dsnWithToken .= "token={$escapedToken};";
+                    }
+                    try {
+                        $pdo = new PDO($dsnWithToken, $username ?: '', '', $options);
+                        \Log::info("OAuth Debug - Method 3 successful: token in DSN");
+                        return $pdo;
+                    } catch (\PDOException $e3) {
+                        \Log::error("OAuth Debug - Method 3 failed: " . $e3->getMessage());
+                        // Re-throw the most informative error
+                        throw $e1; // First error is usually most relevant
+                    }
+                }
             }
             
-            \Log::info("OAuth Debug - PDO connection successful");
-            return $pdo;
+            // This should never be reached, but just in case
+            throw new \InvalidArgumentException("All OAuth connection methods failed");
             
         } catch (\PDOException $e) {
             \Log::error('Snowflake OAuth authentication error: ' . $e->getMessage());
