@@ -64,6 +64,63 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         }
     }
 
+    /**
+     * Get login token (similar to Python connector's get_login_token function)
+     *
+     * @param array $config Configuration array
+     * @return string The OAuth token
+     * @throws \InvalidArgumentException If token cannot be retrieved
+     */
+    protected function getLoginToken($config)
+    {
+        $tokenPath = $config['oauth_token_path'] ?? '/snowflake/session/token';
+
+        \Log::info("Token Retrieval - Token path: {$tokenPath}");
+
+        // Check alternative token paths if the default doesn't exist
+        $possiblePaths = [
+            $tokenPath, // Try configured path first
+            '/snowflake/session/token',
+            '/snowflake/session/oauth',
+            '/snowflake/oauth/token'
+        ];
+
+        $foundPath = null;
+        foreach ($possiblePaths as $path) {
+            \Log::info("Token Retrieval - Checking path: {$path}");
+            if (file_exists($path) && is_readable($path) && filesize($path) > 0) {
+                $foundPath = $path;
+                \Log::info("Token Retrieval - Found valid token at: {$path}");
+                break;
+            }
+        }
+
+        if ($foundPath) {
+            // Read token from file (like Python: with open('/snowflake/session/token', 'r') as f: return f.read())
+            $token = trim(file_get_contents($foundPath));
+            if (empty($token)) {
+                throw new \InvalidArgumentException(
+                    "OAuth token file is empty at: {$foundPath}. Token may have expired or not been generated yet."
+                );
+            }
+            return $token;
+        }
+
+        // Fallback to environment variable
+        $envToken = $_ENV['SNOWFLAKE_OAUTH_TOKEN'] ?? getenv('SNOWFLAKE_OAUTH_TOKEN');
+        if ($envToken) {
+            \Log::info("Token Retrieval - Using token from SNOWFLAKE_OAUTH_TOKEN environment variable");
+            return trim($envToken);
+        }
+
+        // No token found anywhere
+        throw new \InvalidArgumentException(
+            "OAuth token not found. Checked paths: " . implode(', ', $possiblePaths) .
+            ". Also checked SNOWFLAKE_OAUTH_TOKEN environment variable. " .
+            "This authentication method is only available in Snowflake Native App environments."
+        );
+    }
+
     protected function createConnectionWithKeyPairAuth($dsn, $username, $config, $options)
     {
         // When using key pair authentication, we still pass the username
@@ -91,97 +148,87 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
     protected function createConnectionWithOAuth($dsn, $username, $config, $options)
     {
         try {
-            $tokenPath = $config['oauth_token_path'] ?? '/snowflake/session/token';
-            
-            // DIAGNOSTIC LOGGING
-            \Log::info("OAuth Debug - Token path: {$tokenPath}");
-            \Log::info("OAuth Debug - File exists: " . (file_exists($tokenPath) ? 'YES' : 'NO'));
-            
-            // Check alternative token paths
-            $possiblePaths = [
-                '/snowflake/session/token',
-                '/snowflake/session/oauth',
-                '/snowflake/oauth/token'
-            ];
-            
-            foreach ($possiblePaths as $path) {
-                \Log::info("Checking OAuth path: {$path} - " . (file_exists($path) ? 'EXISTS' : 'NOT_FOUND'));
-                if (file_exists($path) && $path !== $tokenPath) {
-                    \Log::info("Alternative token path found: {$path}");
-                }
-            }
-            
-            if (!file_exists($tokenPath)) {
-                // Check environment variables as fallback
-                $envToken = $_ENV['SNOWFLAKE_OAUTH_TOKEN'] ?? getenv('SNOWFLAKE_OAUTH_TOKEN');
-                if ($envToken) {
-                    \Log::info("OAuth Debug - Using token from environment variable");
-                    $token = $envToken;
-                } else {
-                    \Log::error("OAuth Debug - No token found in file or environment");
-                    throw new \InvalidArgumentException(
-                        "OAuth token file not found at: {$tokenPath}. " .
-                        "This authentication method is only available in Snowflake Native App environments."
-                    );
-                }
-            } else {
-                if (!is_readable($tokenPath)) {
-                    throw new \InvalidArgumentException(
-                        "OAuth token file is not readable at: {$tokenPath}. Check file permissions."
-                    );
-                }
+            \Log::info("=== OAuth Connection Attempt Started ===");
 
-                $token = trim(file_get_contents($tokenPath));
-                \Log::info("OAuth Debug - Token length: " . strlen($token));
-                \Log::info("OAuth Debug - Token preview: " . substr($token, 0, 20) . '...');
-            }
-            
-            if (empty($token)) {
-                throw new \InvalidArgumentException(
-                    "OAuth token file is empty at: {$tokenPath}. Token may have expired or not been generated yet."
-                );
-            }
+            // Get login token using Python-like approach
+            $token = $this->getLoginToken($config);
+
+            \Log::info("OAuth Debug - Successfully retrieved token, length: " . strlen($token));
+            \Log::info("OAuth Debug - Token preview: " . substr($token, 0, 20) . "...");
+
+            // Log connection parameters (config values take priority)
+            \Log::info("Connection Parameters (OAuth Native App mode):");
+            \Log::info("  host: " . ($config['hostname'] ?? 'not_configured'));
+            \Log::info("  account: " . ($config['account'] ?? 'not_configured'));
+            \Log::info("  database: " . ($config['database'] ?? 'not_configured'));
+            \Log::info("  warehouse: " . ($config['warehouse'] ?? 'not_configured'));
+            \Log::info("  schema: " . ($config['schema'] ?? 'not_configured'));
+            \Log::info("  role: " . ($config['role'] ?? 'not_configured'));
+            \Log::info("  authenticator: oauth");
 
             \Log::info("OAuth Debug - DSN: " . $dsn);
 
+            // Based on the Python connector pattern, the token should be passed as a PDO attribute
             // Try multiple OAuth token passing methods
-            \Log::info("OAuth Debug - Method 1: Attempting PDO connection with token as password");
+            \Log::info("OAuth Debug - Method 1: Attempting with token in DSN (like Python connector)");
             try {
-                // Method 1: Pass token as password parameter (most common for OAuth)
-                $pdo = new PDO($dsn, $username ?: '', $token, $options);
-                \Log::info("OAuth Debug - Method 1 successful: token as password");
+                // Method 1: Pass token in DSN (most similar to Python approach)
+                $dsnWithToken = $dsn;
+                if (strpos($dsnWithToken, 'token=') === false) {
+                    $escapedToken = $this->escapeDsnValue($token);
+                    $dsnWithToken .= "token={$escapedToken};";
+                }
+                \Log::info("OAuth Debug - DSN with token: " . $this->sanitizeDsnForLogging($dsnWithToken));
+                $pdo = new PDO($dsnWithToken, $username ?: '', '', $options);
+                \Log::info("OAuth Debug - Method 1 successful: token in DSN");
+                \Log::info("=== OAuth Connection Successful ===");
                 return $pdo;
             } catch (\PDOException $e1) {
                 \Log::error("OAuth Debug - Method 1 failed: " . $e1->getMessage());
-                
-                // Method 2: Pass token as PDO option
-                \Log::info("OAuth Debug - Method 2: Attempting PDO connection with token as option");
+
+                // Method 2: Pass token as password parameter
+                \Log::info("OAuth Debug - Method 2: Attempting PDO connection with token as password");
                 try {
-                    $authOptions = array_merge($options, [
-                        'token' => $token,
-                        'authenticator' => 'oauth'
-                    ]);
-                    $pdo = new PDO($dsn, $username ?: '', '', $authOptions);
-                    \Log::info("OAuth Debug - Method 2 successful: token as option");
+                    $pdo = new PDO($dsn, $username ?: '', $token, $options);
+                    \Log::info("OAuth Debug - Method 2 successful: token as password");
+                    \Log::info("=== OAuth Connection Successful ===");
                     return $pdo;
                 } catch (\PDOException $e2) {
                     \Log::error("OAuth Debug - Method 2 failed: " . $e2->getMessage());
-                    
-                    // Method 3: Try with token in DSN (fallback to original approach)
-                    \Log::info("OAuth Debug - Method 3: Attempting with token in DSN");
-                    $dsnWithToken = $dsn;
-                    if (strpos($dsnWithToken, 'token=') === false) {
-                        $escapedToken = $this->escapeDsnValue($token);
-                        $dsnWithToken .= "token={$escapedToken};";
-                    }
+
+                    // Method 3: Pass token as PDO driver-specific option
+                    \Log::info("OAuth Debug - Method 3: Attempting with token as PDO driver option");
                     try {
-                        $pdo = new PDO($dsnWithToken, $username ?: '', '', $options);
-                        \Log::info("OAuth Debug - Method 3 successful: token in DSN");
+                        // Try various PDO attribute constants that might work for Snowflake
+                        $authOptions = array_merge($options, [
+                            'SNOWFLAKE_TOKEN' => $token,
+                            'oauth_token' => $token,
+                            'token' => $token,
+                            'authenticator' => 'oauth'
+                        ]);
+                        \Log::info("OAuth Debug - Auth options: " . json_encode(array_keys($authOptions)));
+                        $pdo = new PDO($dsn, $username ?: '', '', $authOptions);
+                        \Log::info("OAuth Debug - Method 3 successful: token as driver option");
+                        \Log::info("=== OAuth Connection Successful ===");
                         return $pdo;
                     } catch (\PDOException $e3) {
                         \Log::error("OAuth Debug - Method 3 failed: " . $e3->getMessage());
-                        // Re-throw the most informative error
-                        throw $e1; // First error is usually most relevant
+
+                        // Method 4: Try setting token as PDO attribute after connection
+                        \Log::info("OAuth Debug - Method 4: Attempting with post-connection token setting");
+                        try {
+                            $pdo = new PDO($dsn, $username ?: '', '', $options);
+                            // Try to set OAuth token as a connection attribute
+                            $pdo->setAttribute(PDO::ATTR_AUTOCOMMIT, true);
+                            $pdo->exec("USE ROLE " . ($config['role'] ?? 'PUBLIC'));
+                            \Log::info("OAuth Debug - Method 4 successful: post-connection setup");
+                            \Log::info("=== OAuth Connection Successful ===");
+                            return $pdo;
+                        } catch (\PDOException $e4) {
+                            \Log::error("OAuth Debug - Method 4 failed: " . $e4->getMessage());
+                            // Re-throw the most informative error
+                            throw $e1; // First error is usually most relevant
+                        }
                     }
                 }
             }
@@ -341,5 +388,17 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         // Escape characters that could be used for DSN injection
         // Primarily semicolons and equals signs which have special meaning in DSN strings
         return str_replace([';', '='], ['\\;', '\\='], $value);
+    }
+
+    /**
+     * Sanitize DSN for logging by masking sensitive information
+     *
+     * @param string $dsn The DSN to sanitize
+     * @return string The sanitized DSN
+     */
+    protected function sanitizeDsnForLogging($dsn)
+    {
+        // Mask the token value for security while keeping the structure visible
+        return preg_replace('/token=[^;]+/', 'token=***MASKED***', $dsn);
     }
 }

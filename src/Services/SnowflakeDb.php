@@ -207,79 +207,197 @@ class SnowflakeDb extends SqlDb
 
     /**
      * Detect if running in a Snowflake Native App environment and configure OAuth settings
-     * 
+     *
      * @param array $config Configuration array to modify
      * @return void
      */
     protected static function detectAndConfigureOAuthEnvironment(array &$config)
     {
+        \Log::info('=== OAuth Environment Detection Started ===');
+
+        // Log all relevant environment variables for debugging
+        $envVarsToCheck = [
+            'SNOWFLAKE_HOST',
+            'SNOWFLAKE_ACCOUNT',
+            'SNOWFLAKE_DATABASE',
+            'SNOWFLAKE_WAREHOUSE',
+            'SNOWFLAKE_SCHEMA',
+            'SNOWFLAKE_ROLE',
+            'SNOWFLAKE_OAUTH_TOKEN'
+        ];
+
+        \Log::info('Environment Variables Check:');
+        foreach ($envVarsToCheck as $envVar) {
+            $envValue = $_ENV[$envVar] ?? getenv($envVar);
+            if ($envValue !== false && $envValue !== null && $envValue !== '') {
+                // Mask sensitive values
+                if (strpos($envVar, 'TOKEN') !== false) {
+                    \Log::info("  {$envVar}: ***MASKED*** (length: " . strlen($envValue) . ")");
+                } else {
+                    \Log::info("  {$envVar}: {$envValue}");
+                }
+            } else {
+                \Log::info("  {$envVar}: NOT_SET");
+            }
+        }
+
         // Check if we're in a Snowflake Native App environment
         $possibleTokenPaths = [
             '/snowflake/session/token',
             '/snowflake/session/oauth',
             '/snowflake/oauth/token'
         ];
-        
+
         $defaultTokenPath = '/snowflake/session/token';
         $isNativeAppEnvironment = false;
         $foundTokenPath = null;
-        
+
+        \Log::info('Token File Detection:');
         foreach ($possibleTokenPaths as $path) {
-            \Log::info("Environment Detection - Checking path: {$path} - " . (file_exists($path) ? 'EXISTS' : 'NOT_FOUND'));
-            if (file_exists($path)) {
+            $exists = file_exists($path);
+            $readable = $exists ? is_readable($path) : false;
+            $size = ($exists && $readable) ? filesize($path) : 0;
+
+            \Log::info("  {$path}: " .
+                ($exists ? 'EXISTS' : 'NOT_FOUND') .
+                ($readable ? ', READABLE' : ($exists ? ', NOT_READABLE' : '')) .
+                ($size > 0 ? ", SIZE: {$size} bytes" : ($exists ? ', EMPTY' : '')));
+
+            if ($exists && $readable && $size > 0) {
                 $isNativeAppEnvironment = true;
                 $foundTokenPath = $path;
                 if ($path !== $defaultTokenPath) {
-                    \Log::info("Environment Detection - Found token at alternative path: {$path}");
+                    \Log::info("  Found token at alternative path: {$path}");
                     $config['oauth_token_path'] = $path; // Update config with correct path
+                }
+
+                // Read and log token info (but mask the actual token)
+                $tokenContent = trim(file_get_contents($path));
+                if (!empty($tokenContent)) {
+                    \Log::info("  Token content: length=" . strlen($tokenContent) .
+                              ", preview=" . substr($tokenContent, 0, 20) . "...");
+                } else {
+                    \Log::warning("  Token file exists but is empty: {$path}");
                 }
                 break;
             }
         }
-        
-        // If no authentication method is explicitly set and we're in a native app environment,
-        // suggest OAuth authentication
-        if ($isNativeAppEnvironment && empty($config['authentication_method'])) {
-            \Log::info('Detected Snowflake Native App environment, OAuth token available at: ' . $foundTokenPath);
-            
-            // Auto-configure OAuth settings from environment variables if available
-            if (empty($config['account']) && !empty($_ENV['SNOWFLAKE_ACCOUNT'])) {
-                $config['account'] = $_ENV['SNOWFLAKE_ACCOUNT'];
-                \Log::info('Auto-configured Snowflake account from SNOWFLAKE_ACCOUNT environment variable');
+
+        // Only apply environment variable auto-configuration if:
+        // 1. OAuth authentication method is explicitly selected, OR
+        // 2. No authentication method is set and we're in a native app environment
+        $authMethod = $config['authentication_method'] ?? null;
+        $shouldApplyOAuthConfig = ($authMethod === 'oauth') ||
+                                 ($isNativeAppEnvironment && empty($authMethod));
+
+        if ($shouldApplyOAuthConfig) {
+            if ($authMethod === 'oauth') {
+                \Log::info('OAuth authentication method selected - applying OAuth configuration');
+            } else {
+                \Log::info('Detected Snowflake Native App environment with no auth method set - applying OAuth configuration');
             }
-            
-            if (empty($config['hostname']) && !empty($_ENV['SNOWFLAKE_HOST'])) {
-                $config['hostname'] = $_ENV['SNOWFLAKE_HOST'];
-                \Log::info('Auto-configured Snowflake hostname from SNOWFLAKE_HOST environment variable');
+
+            if ($foundTokenPath) {
+                \Log::info('OAuth token available at: ' . $foundTokenPath);
             }
-            
-            if (empty($config['database']) && !empty($_ENV['SNOWFLAKE_DATABASE'])) {
-                $config['database'] = $_ENV['SNOWFLAKE_DATABASE'];
-                \Log::info('Auto-configured Snowflake database from SNOWFLAKE_DATABASE environment variable');
+
+            \Log::info('Configuration priority: Config values > Environment variables');
+
+            // Only use environment variables as fallback when config values are not provided
+            // Config values take priority over environment variables
+            if (empty($config['account'])) {
+                $envAccount = $_ENV['SNOWFLAKE_ACCOUNT'] ?? getenv('SNOWFLAKE_ACCOUNT');
+                if ($envAccount) {
+                    $config['account'] = $envAccount;
+                    \Log::info('  account: set from SNOWFLAKE_ACCOUNT environment variable');
+                } else {
+                    \Log::info('  account: not configured and SNOWFLAKE_ACCOUNT environment variable not found');
+                }
+            } else {
+                \Log::info('  account: using configured value (ignoring environment variable)');
             }
-            
-            if (empty($config['warehouse']) && !empty($_ENV['SNOWFLAKE_WAREHOUSE'])) {
-                $config['warehouse'] = $_ENV['SNOWFLAKE_WAREHOUSE'];
-                \Log::info('Auto-configured Snowflake warehouse from SNOWFLAKE_WAREHOUSE environment variable');
+
+            if (empty($config['hostname'])) {
+                $envHost = $_ENV['SNOWFLAKE_HOST'] ?? getenv('SNOWFLAKE_HOST');
+                if ($envHost) {
+                    $config['hostname'] = $envHost;
+                    \Log::info('  hostname: set from SNOWFLAKE_HOST environment variable');
+                } else {
+                    \Log::info('  hostname: not configured and SNOWFLAKE_HOST environment variable not found');
+                }
+            } else {
+                \Log::info('  hostname: using configured value (ignoring environment variable)');
             }
-            
-            if (empty($config['schema']) && !empty($_ENV['SNOWFLAKE_SCHEMA'])) {
-                $config['schema'] = $_ENV['SNOWFLAKE_SCHEMA'];
-                \Log::info('Auto-configured Snowflake schema from SNOWFLAKE_SCHEMA environment variable');
+
+            if (empty($config['database'])) {
+                $envDatabase = $_ENV['SNOWFLAKE_DATABASE'] ?? getenv('SNOWFLAKE_DATABASE');
+                if ($envDatabase) {
+                    $config['database'] = $envDatabase;
+                    \Log::info('  database: set from SNOWFLAKE_DATABASE environment variable');
+                } else {
+                    \Log::info('  database: not configured and SNOWFLAKE_DATABASE environment variable not found');
+                }
+            } else {
+                \Log::info('  database: using configured value (ignoring environment variable)');
             }
-            
+
+            if (empty($config['warehouse'])) {
+                $envWarehouse = $_ENV['SNOWFLAKE_WAREHOUSE'] ?? getenv('SNOWFLAKE_WAREHOUSE');
+                if ($envWarehouse) {
+                    $config['warehouse'] = $envWarehouse;
+                    \Log::info('  warehouse: set from SNOWFLAKE_WAREHOUSE environment variable');
+                } else {
+                    \Log::info('  warehouse: not configured and SNOWFLAKE_WAREHOUSE environment variable not found');
+                }
+            } else {
+                \Log::info('  warehouse: using configured value (ignoring environment variable)');
+            }
+
+            if (empty($config['schema'])) {
+                $envSchema = $_ENV['SNOWFLAKE_SCHEMA'] ?? getenv('SNOWFLAKE_SCHEMA');
+                if ($envSchema) {
+                    $config['schema'] = $envSchema;
+                    \Log::info('  schema: set from SNOWFLAKE_SCHEMA environment variable');
+                } else {
+                    \Log::info('  schema: not configured and SNOWFLAKE_SCHEMA environment variable not found');
+                }
+            } else {
+                \Log::info('  schema: using configured value (ignoring environment variable)');
+            }
+
+            if (empty($config['role'])) {
+                $envRole = $_ENV['SNOWFLAKE_ROLE'] ?? getenv('SNOWFLAKE_ROLE');
+                if ($envRole) {
+                    $config['role'] = $envRole;
+                    \Log::info('  role: set from SNOWFLAKE_ROLE environment variable');
+                } else {
+                    \Log::info('  role: not configured and SNOWFLAKE_ROLE environment variable not found');
+                }
+            } else {
+                \Log::info('  role: using configured value (ignoring environment variable)');
+            }
+
             // Set OAuth token path if not already configured
             if (empty($config['oauth_token_path'])) {
                 $config['oauth_token_path'] = $defaultTokenPath;
+                \Log::info('  oauth_token_path: set to default path');
+            } else {
+                \Log::info('  oauth_token_path: using configured value');
             }
+        } else {
+            \Log::info('OAuth auto-configuration skipped - authentication method is not oauth');
         }
-        
+
         // Log environment detection result
         if ($isNativeAppEnvironment) {
-            \Log::info('Snowflake Native App environment detected - OAuth authentication is available');
+            \Log::info('RESULT: Snowflake Native App environment detected - OAuth authentication is available');
+            \Log::info('Found token path: ' . $foundTokenPath);
         } else {
-            \Log::debug('Standard Snowflake environment - using traditional authentication methods');
+            \Log::info('RESULT: Standard Snowflake environment - using traditional authentication methods');
+            \Log::info('No OAuth token files found in expected locations');
         }
+
+        \Log::info('=== OAuth Environment Detection Completed ===');
     }
 
     public function getApiDocInfo()
