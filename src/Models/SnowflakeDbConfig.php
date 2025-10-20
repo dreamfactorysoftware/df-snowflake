@@ -11,15 +11,17 @@ use DreamFactory\Core\SqlDb\Models\BaseSqlDbConfig;
  */
 class SnowflakeDbConfig extends BaseSqlDbConfig
 {
-    protected $appends = ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role'];
+    protected $appends = ['hostname', 'account', 'account_locator', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role', 'authenticator', 'oauth_client_id', 'oauth_client_secret', 'oauth_client_secret_raw', 'oauth_access_token', 'oauth_refresh_token', 'oauth_token_expires_at', 'use_odbc'];
 
-    protected $encrypted = ['username', 'password', 'key', 'passcode'];
+    // WORKAROUND: Remove oauth tokens from encryption due to truncation bug in df-core
+    protected $encrypted = ['username', 'password', 'key', 'passcode', 'oauth_client_secret'];
 
-    protected $protected = ['password'];
+    // WORKAROUND: OAuth tokens NOT protected to avoid truncation (they're also not encrypted above)
+    protected $protected = ['password', 'oauth_client_secret'];
 
     protected function getConnectionFields()
     {
-        return ['hostname', 'account', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role'];
+        return ['hostname', 'account', 'account_locator', 'username', 'password', 'key', 'passcode', 'database', 'warehouse', 'schema', 'role', 'authenticator', 'oauth_client_id', 'oauth_client_secret', 'oauth_client_secret_raw', 'oauth_access_token', 'oauth_refresh_token', 'oauth_token_expires_at', 'use_odbc'];
     }
 
     public static function getDriverName()
@@ -32,6 +34,24 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
     {
         $defaults = [
             [
+                'name' => 'use_odbc',
+                'label' => 'Use ODBC Driver',
+                'type' => 'boolean',
+                'description' => 'Enable to use ODBC driver instead of PDO. Required for OAuth authentication.'
+            ],
+            [
+                'name' => 'authenticator',
+                'label' => 'Authentication Method',
+                'type' => 'picklist',
+                'values' => [
+                    ['label' => 'Username/Password', 'name' => 'snowflake'],
+                    ['label' => 'Key Pair (JWT)', 'name' => 'snowflake_jwt'],
+                    ['label' => 'OAuth', 'name' => 'oauth'],
+                    ['label' => 'External Browser SSO', 'name' => 'externalbrowser']
+                ],
+                'description' => 'Choose the authentication method for connecting to Snowflake.'
+            ],
+            [
                 'name' => 'hostname',
                 'label' => 'Hostname',
                 'type' => 'string',
@@ -41,7 +61,13 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'name' => 'account',
                 'label' => 'Account',
                 'type' => 'string',
-                'description' => 'Your Snowflake account name (<a href="https://docs.snowflake.com/en/user-guide/connecting.html#your-snowflake-account-name">doc</a>).'
+                'description' => 'Your Snowflake account identifier (e.g., UCZWIRU-JUB93638). This is used for ODBC connections (<a href="https://docs.snowflake.com/en/user-guide/connecting.html#your-snowflake-account-name">doc</a>).'
+            ],
+            [
+                'name' => 'account_locator',
+                'label' => 'Account Locator',
+                'type' => 'string',
+                'description' => 'Your Snowflake account locator (e.g., njb13282). Required only for OAuth authentication. Leave blank for non-OAuth connections.'
             ],
             [
                 'name' => 'username',
@@ -62,7 +88,7 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'label' => 'Password',
                 'type' => 'password',
                 'description' => 'The password for the snowflake account user. This can be a lookup key. ' .
-                    'If you are using key pair authentication, leave this blank.'
+                    'If you are using key pair or OAuth authentication, leave this blank.'
             ],
             [
                 'name' => 'passcode',
@@ -70,6 +96,42 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'type' => 'password',
                 'description' => 'If your private key file is encrypted, specify the passphrase here. ' .
                     'Leave blank if your private key is not encrypted.'
+            ],
+            [
+                'name' => 'oauth_client_id',
+                'label' => 'OAuth Client ID',
+                'type' => 'string',
+                'description' => 'OAuth 2.0 Client ID for OAuth authentication.'
+            ],
+            [
+                'name' => 'oauth_client_secret',
+                'label' => 'OAuth Client Secret (Deprecated)',
+                'type' => 'password',
+                'description' => 'DEPRECATED: Use oauth_client_secret_raw instead. This field has a truncation bug.'
+            ],
+            [
+                'name' => 'oauth_client_secret_raw',
+                'label' => 'OAuth Client Secret',
+                'type' => 'password',
+                'description' => 'OAuth 2.0 Client Secret for OAuth authentication (unencrypted workaround for truncation bug).'
+            ],
+            [
+                'name' => 'oauth_access_token',
+                'label' => 'OAuth Access Token',
+                'type' => 'password',
+                'description' => 'Current OAuth access token (auto-populated after authorization).'
+            ],
+            [
+                'name' => 'oauth_refresh_token',
+                'label' => 'OAuth Refresh Token',
+                'type' => 'password',
+                'description' => 'OAuth refresh token (auto-populated after authorization).'
+            ],
+            [
+                'name' => 'oauth_token_expires_at',
+                'label' => 'OAuth Token Expiration',
+                'type' => 'string',
+                'description' => 'Token expiration timestamp (auto-populated).'
             ],
             [
                 'name' => 'role',
