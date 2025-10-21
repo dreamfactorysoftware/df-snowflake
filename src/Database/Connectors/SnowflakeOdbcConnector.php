@@ -25,6 +25,15 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
      */
     public function connect(array $config)
     {
+        // Debug: Log config structure
+        \Log::info('SnowflakeOdbcConnector::connect() called with config', [
+            'config_keys' => array_keys($config),
+            'has_oauth_access_token' => isset($config['oauth_access_token']),
+            'oauth_token_length' => isset($config['oauth_access_token']) ? strlen($config['oauth_access_token']) : 0,
+            'authenticator' => $config['authenticator'] ?? 'not set',
+            'username' => $config['username'] ?? 'not set',
+        ]);
+
         $dsn = $this->getDsn($config);
 
         // ODBC connections don't use username/password in odbc_connect for OAuth
@@ -32,21 +41,49 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
         $username = $config['username'] ?? '';
         $password = $config['password'] ?? '';
 
-        // Override password if using OAuth
+        // Override username/password if using OAuth - token is in DSN
         if (!empty($config['oauth_access_token'])) {
+            $username = '';
             $password = '';
         }
 
         try {
-            $connection = odbc_connect($dsn, $username, $password);
+            // Suppress PHP warnings during connection attempt
+            $connection = @odbc_connect($dsn, $username, $password);
 
             if (!$connection) {
-                throw new \Exception('Failed to connect to Snowflake via ODBC: ' . odbc_errormsg());
+                // Get detailed error information
+                $errorMsg = 'Failed to connect to Snowflake via ODBC';
+
+                // Try to get ODBC error message
+                if (function_exists('odbc_errormsg')) {
+                    $odbcError = odbc_errormsg();
+                    if (!empty($odbcError)) {
+                        $errorMsg .= ': ' . $odbcError;
+                    }
+                }
+
+                // Also check for error code
+                if (function_exists('odbc_error')) {
+                    $errorCode = odbc_error();
+                    if (!empty($errorCode)) {
+                        $errorMsg .= ' (Error code: ' . $errorCode . ')';
+                    }
+                }
+
+                \Log::error('Snowflake ODBC connection failed', [
+                    'dsn' => $this->sanitizeDsnForLogging($dsn),
+                    'username' => $username,
+                    'error' => $errorMsg
+                ]);
+
+                throw new \Exception($errorMsg);
             }
 
             // Set connection attributes
             $this->configureConnection($connection, $config);
 
+            \Log::info('Snowflake ODBC connection successful');
             return $connection;
         } catch (\Exception $e) {
             \Log::error('Snowflake ODBC connection error: ' . $e->getMessage());
@@ -85,13 +122,92 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
         // Start with the ODBC driver name
         $dsn = "Driver=Snowflake;";
 
-        // Add server/account information
-        if (!empty($hostname)) {
-            $dsn .= "Server={$hostname};";
+        // ========================================
+        // COMPREHENSIVE LOGGING FOR SPCS ENV VARS
+        // ========================================
+        \Log::info('=== CHECKING FOR SPCS ENVIRONMENT VARIABLES ===');
+
+        // Check for SPCS environment variables (when running in Snowpark Container Services)
+        $spcsHost = getenv('SNOWFLAKE_HOST');
+        $spcsAccount = getenv('SNOWFLAKE_ACCOUNT');
+
+        \Log::info('SNOWFLAKE_HOST environment variable', [
+            'exists' => $spcsHost !== false,
+            'value' => $spcsHost ?: 'NOT SET',
+            'is_empty' => empty($spcsHost),
+            'type' => gettype($spcsHost)
+        ]);
+
+        \Log::info('SNOWFLAKE_ACCOUNT environment variable', [
+            'exists' => $spcsAccount !== false,
+            'value' => $spcsAccount ?: 'NOT SET',
+            'is_empty' => empty($spcsAccount),
+            'type' => gettype($spcsAccount)
+        ]);
+
+        // Log ALL environment variables starting with SNOWFLAKE
+        $allEnv = getenv();
+        $snowflakeEnvVars = array_filter($allEnv, function($key) {
+            return strpos(strtoupper($key), 'SNOWFLAKE') === 0;
+        }, ARRAY_FILTER_USE_KEY);
+
+        \Log::info('All SNOWFLAKE_* environment variables found', [
+            'count' => count($snowflakeEnvVars),
+            'vars' => $snowflakeEnvVars
+        ]);
+
+        // Also check for common container/service env vars
+        $containerEnvVars = [
+            'HOSTNAME' => getenv('HOSTNAME'),
+            'PWD' => getenv('PWD'),
+            'HOME' => getenv('HOME'),
+        ];
+        \Log::info('Container environment context', $containerEnvVars);
+
+        if ($spcsHost && $spcsAccount) {
+            \Log::info('✅ SPCS environment detected! Using SNOWFLAKE_HOST and SNOWFLAKE_ACCOUNT', [
+                'host' => $spcsHost,
+                'account' => $spcsAccount
+            ]);
+        } else {
+            \Log::warning('❌ SPCS environment variables NOT found or empty!', [
+                'SNOWFLAKE_HOST_exists' => $spcsHost !== false,
+                'SNOWFLAKE_ACCOUNT_exists' => $spcsAccount !== false,
+                'will_use_config_values' => true
+            ]);
         }
 
-        if (!empty($account)) {
-            $dsn .= "Account={$account};";
+        // Add server/account information
+        // Priority: SPCS env vars > account_locator > account > hostname
+        $accountForServer = $spcsAccount ?: ($config['account'] ?? null);
+        $serverHostname = $spcsHost ?: ($config['hostname'] ?? null);
+
+        \Log::info('Final account/hostname selection', [
+            'accountForServer' => $accountForServer,
+            'serverHostname' => $serverHostname,
+            'source_account' => $spcsAccount ? 'SPCS env' : 'config',
+            'source_hostname' => $spcsHost ? 'SPCS env' : 'config'
+        ]);
+
+        if ($authenticator === 'oauth' && !empty($config['account_locator']) && !$spcsAccount) {
+            $accountForServer = strtolower($config['account_locator']);
+            \Log::info('Using account_locator for OAuth', ['account' => $accountForServer]);
+        }
+
+        // ODBC requires Server parameter - use SPCS host if available, otherwise construct
+        if (!empty($serverHostname)) {
+            $dsn .= "Server={$serverHostname};";
+        } elseif (!empty($accountForServer)) {
+            // Construct server URL from account name
+            $server = "{$accountForServer}.snowflakecomputing.com";
+            $dsn .= "Server={$server};";
+        } else {
+            throw new \InvalidArgumentException("Either hostname or account is required for Snowflake connections.");
+        }
+
+        // Account is still needed for some operations
+        if (!empty($accountForServer)) {
+            $dsn .= "Account={$accountForServer};";
         }
 
         // Add database context
@@ -121,8 +237,25 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
                 // OAuth token-based authentication
                 $dsn .= "Authenticator=oauth;";
                 if (!empty($config['oauth_access_token'])) {
-                    $token = $this->escapeDsnValue($config['oauth_access_token']);
+                    // Do NOT escape the token - it should be passed as-is
+                    // Also add UID parameter with username for OAuth
+                    $token = $config['oauth_access_token'];
+                    \Log::info('OAuth token found in config', [
+                        'token_length' => strlen($token),
+                        'token_preview' => substr($token, 0, 20) . '...' . substr($token, -20),
+                        'username' => $config['username'] ?? 'not set'
+                    ]);
                     $dsn .= "Token={$token};";
+
+                    // Add username as UID for OAuth authentication
+                    if (!empty($config['username'])) {
+                        $uid = $this->escapeDsnValue($config['username']);
+                        $dsn .= "UID={$uid};";
+                    }
+                } else {
+                    \Log::warning('OAuth authenticator selected but oauth_access_token is empty!', [
+                        'config_keys' => array_keys($config)
+                    ]);
                 }
                 break;
 
@@ -160,6 +293,11 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
 
         // Add application identifier
         $dsn .= "Application=DreamFactory_Snowflake_ODBC;";
+
+        // Memory optimization settings for ODBC driver
+        // Use client-side result set to reduce server-side buffering
+        $dsn .= "CLIENT_RESULT_CHUNK_SIZE=16;"; // Smaller chunks (default is 128)
+        $dsn .= "CLIENT_PREFETCH_THREADS=1;"; // Reduce prefetch threads
 
         \Log::debug('Snowflake ODBC DSN (sanitized): ' . $this->sanitizeDsnForLogging($dsn));
 
