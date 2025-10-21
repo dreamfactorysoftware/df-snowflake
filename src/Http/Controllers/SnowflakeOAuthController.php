@@ -91,6 +91,53 @@ class SnowflakeOAuthController extends Controller
         }
 
         $config = $service->config;
+
+        // Check if running in SPCS (Snowpark Container Services)
+        $spcsTokenPath = '/snowflake/session/token';
+        if (file_exists($spcsTokenPath)) {
+            \Log::info('SPCS environment detected, using session token from ' . $spcsTokenPath);
+
+            try {
+                // Read the SPCS session token
+                $accessToken = trim(file_get_contents($spcsTokenPath));
+
+                if (empty($accessToken)) {
+                    throw new \Exception('SPCS session token file is empty');
+                }
+
+                \Log::info('Successfully read SPCS session token', [
+                    'token_length' => strlen($accessToken),
+                    'token_prefix' => substr($accessToken, 0, 20) . '...'
+                ]);
+
+                // Update service config with SPCS token
+                $config['oauth_access_token'] = $accessToken;
+                // SPCS tokens don't expire in the traditional sense, set far future
+                $config['oauth_token_expires_at'] = now()->addYears(10)->toDateTimeString();
+                // No refresh token needed for SPCS
+                $config['oauth_refresh_token'] = null;
+
+                // Enable ODBC mode and set authenticator
+                $config['use_odbc'] = true;
+                $config['authenticator'] = 'oauth';
+
+                $service->config = $config;
+                $service->save();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'OAuth authorization successful using SPCS session token.',
+                    'spcs_mode' => true,
+                    'expires_at' => $config['oauth_token_expires_at']
+                ]);
+
+            } catch (\Exception $e) {
+                \Log::error('Failed to use SPCS session token: ' . $e->getMessage());
+                return response()->json(['error' => 'Failed to read SPCS session token: ' . $e->getMessage()], 500);
+            }
+        }
+
+        // Standard OAuth flow for non-SPCS environments
         $clientId = $config['oauth_client_id'];
         // Use raw (unencrypted) secret to avoid truncation bug
         $clientSecret = $config['oauth_client_secret_raw'] ?? $config['oauth_client_secret'];
@@ -195,6 +242,36 @@ class SnowflakeOAuthController extends Controller
     protected function refreshToken(Service $service)
     {
         $config = $service->config;
+
+        // Check if running in SPCS - re-read the session token
+        $spcsTokenPath = '/snowflake/session/token';
+        if (file_exists($spcsTokenPath)) {
+            \Log::info('SPCS environment detected, refreshing token from ' . $spcsTokenPath);
+
+            try {
+                $accessToken = trim(file_get_contents($spcsTokenPath));
+
+                if (empty($accessToken)) {
+                    throw new \Exception('SPCS session token file is empty');
+                }
+
+                // Update with fresh SPCS token
+                $config['oauth_access_token'] = $accessToken;
+                $config['oauth_token_expires_at'] = now()->addYears(10)->toDateTimeString();
+
+                $service->config = $config;
+                $service->save();
+
+                \Log::info('SPCS token refreshed successfully', ['service_id' => $service->id]);
+                return;
+
+            } catch (\Exception $e) {
+                \Log::error('Failed to refresh SPCS token: ' . $e->getMessage());
+                throw new \Exception('Failed to refresh SPCS session token: ' . $e->getMessage());
+            }
+        }
+
+        // Standard OAuth refresh for non-SPCS environments
         $refreshToken = $config['oauth_refresh_token'] ?? null;
 
         if (!$refreshToken) {
