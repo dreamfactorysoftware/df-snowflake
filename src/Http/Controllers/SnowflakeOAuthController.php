@@ -29,6 +29,54 @@ class SnowflakeOAuthController extends Controller
             return response()->json(['error' => 'Invalid Snowflake service'], 404);
         }
 
+        // Check if running in SPCS (Snowpark Container Services)
+        $spcsTokenPath = '/snowflake/session/token';
+        if (file_exists($spcsTokenPath)) {
+            \Log::info('SPCS environment detected in authorize(), using session token directly');
+
+            try {
+                // Read the SPCS session token
+                $accessToken = trim(file_get_contents($spcsTokenPath));
+
+                if (empty($accessToken)) {
+                    throw new \Exception('SPCS session token file is empty');
+                }
+
+                \Log::info('Successfully read SPCS session token in authorize()', [
+                    'token_length' => strlen($accessToken),
+                    'token_prefix' => substr($accessToken, 0, 20) . '...'
+                ]);
+
+                // Update service config with SPCS token
+                $config = $service->config;
+                $config['oauth_access_token'] = $accessToken;
+                // SPCS tokens don't expire in the traditional sense, set far future
+                $config['oauth_token_expires_at'] = now()->addYears(10)->toDateTimeString();
+                // No refresh token needed for SPCS
+                $config['oauth_refresh_token'] = null;
+
+                // Enable ODBC mode and set authenticator
+                $config['use_odbc'] = true;
+                $config['authenticator'] = 'oauth';
+
+                $service->config = $config;
+                $service->save();
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'OAuth authorization successful using SPCS session token.',
+                    'spcs_mode' => true,
+                    'expires_at' => $config['oauth_token_expires_at'],
+                    'direct_auth' => true
+                ]);
+
+            } catch (\Exception $e) {
+                \Log::error('Failed to use SPCS session token in authorize(): ' . $e->getMessage());
+                return response()->json(['error' => 'Failed to read SPCS session token: ' . $e->getMessage()], 500);
+            }
+        }
+
+        // Standard OAuth flow for non-SPCS environments
         $config = $service->config;
         $clientId = $config['oauth_client_id'] ?? null;
         // Use account_locator for OAuth URLs, fall back to account if not set
