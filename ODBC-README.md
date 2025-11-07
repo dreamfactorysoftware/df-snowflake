@@ -282,6 +282,23 @@ Enable debug logging in config:
 5. **Documentation** - User guide for OAuth setup
 6. **Performance Testing** - Compare PDO vs ODBC performance
 
+## Memory Optimization
+
+The Snowflake ODBC driver buffers result sets in memory, which can cause high memory usage. We've implemented several optimizations:
+
+1. **Replaced SHOW commands with INFORMATION_SCHEMA queries** - SHOW commands return extensive metadata that causes memory bloat
+2. **Reduced chunk size** - Set `CLIENT_RESULT_CHUNK_SIZE=16` (down from default 128MB)
+3. **Reduced prefetch threads** - Set `CLIENT_PREFETCH_THREADS=1` to minimize concurrent buffering
+4. **Skipped constraint loading** - Primary/foreign key info not loaded via ODBC to avoid additional SHOW commands
+
+**Recommended PHP memory_limit**: 512M (minimum 256M)
+
+### Known Limitations for ODBC Mode
+
+- Primary key and foreign key constraints are not loaded (tables work but constraint info unavailable)
+- Some metadata queries may use more memory than PDO equivalents
+- SHOW commands cannot be used directly (would exhaust memory)
+
 ## Technical Notes
 
 ### ODBC vs PDO

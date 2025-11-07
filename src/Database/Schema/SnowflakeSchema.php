@@ -30,24 +30,52 @@ class SnowflakeSchema extends SqlSchema
      */
     protected function getTableNames($schema = '')
     {
-        $sql = 'SHOW TABLES ';
+        // Check if we're using ODBC connection - SHOW commands cause memory issues with ODBC
+        $isOdbc = is_resource($this->connection->getPdo());
 
-        if (!empty($schema)) {
-            $sql .= ' IN ' . $this->quoteTableName($schema);
-        }
+        if ($isOdbc) {
+            // Use INFORMATION_SCHEMA for ODBC connections
+            $sql = 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\'';
+            if (!empty($schema)) {
+                // For ODBC, manually escape the value since quoteValue() expects PDO
+                $escapedSchema = str_replace("'", "''", $schema);
+                $sql .= ' AND TABLE_SCHEMA = \'' . $escapedSchema . '\'';
+            }
 
-        $rows = $this->connection->select($sql);
+            $rows = $this->connection->select($sql);
 
-        $names = [];
-        foreach ($rows as $row) {
-            $row = array_values((array)$row);
-            $schemaName = $schema;
-            $resourceName = $row[1];
-            $internalName = $schemaName . '.' . $resourceName;
-            $name = $resourceName;
-            $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);;
-            $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
-            $names[strtolower($name)] = new TableSchema($settings);
+            $names = [];
+            foreach ($rows as $row) {
+                $row = (array)$row;
+                $schemaName = $schema;
+                $resourceName = $row['TABLE_NAME'];
+                $internalName = $schemaName . '.' . $resourceName;
+                $name = $resourceName;
+                $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $names[strtolower($name)] = new TableSchema($settings);
+            }
+        } else {
+            // Use SHOW TABLES for PDO connections
+            $sql = 'SHOW TABLES ';
+
+            if (!empty($schema)) {
+                $sql .= ' IN ' . $this->quoteTableName($schema);
+            }
+
+            $rows = $this->connection->select($sql);
+
+            $names = [];
+            foreach ($rows as $row) {
+                $row = array_values((array)$row);
+                $schemaName = $schema;
+                $resourceName = $row[1];
+                $internalName = $schemaName . '.' . $resourceName;
+                $name = $resourceName;
+                $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);;
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $names[strtolower($name)] = new TableSchema($settings);
+            }
         }
 
         return $names;
@@ -58,24 +86,51 @@ class SnowflakeSchema extends SqlSchema
      */
     public function getProcedureNames($schema = '')
     {
-        $sql = 'SHOW PROCEDURES ';
+        // Check if we're using ODBC connection - SHOW commands cause memory issues with ODBC
+        $isOdbc = is_resource($this->connection->getPdo());
 
-        if (!empty($schema)) {
-            $sql .= ' IN ' . $this->quoteTableName($schema);
-        }
+        if ($isOdbc) {
+            // Use INFORMATION_SCHEMA for ODBC connections
+            $sql = 'SELECT PROCEDURE_NAME FROM INFORMATION_SCHEMA.PROCEDURES';
+            if (!empty($schema)) {
+                $escapedSchema = str_replace("'", "''", $schema);
+                $sql .= ' WHERE PROCEDURE_SCHEMA = \'' . $escapedSchema . '\'';
+            }
 
-        $rows = $this->connection->select($sql);
+            $rows = $this->connection->select($sql);
 
-        $names = [];
-        foreach ($rows as $row) {
-            $row = array_values((array)$row);
-            $schemaName = $schema;
-            $resourceName = $row[1];
-            $internalName = $schemaName . '.' . $resourceName;
-            $name = $resourceName;
-            $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
-            $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
-            $names[strtolower($name)] = new ProcedureSchema($settings);
+            $names = [];
+            foreach ($rows as $row) {
+                $row = (array)$row;
+                $schemaName = $schema;
+                $resourceName = $row['PROCEDURE_NAME'];
+                $internalName = $schemaName . '.' . $resourceName;
+                $name = $resourceName;
+                $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $names[strtolower($name)] = new ProcedureSchema($settings);
+            }
+        } else {
+            // Use SHOW PROCEDURES for PDO connections
+            $sql = 'SHOW PROCEDURES ';
+
+            if (!empty($schema)) {
+                $sql .= ' IN ' . $this->quoteTableName($schema);
+            }
+
+            $rows = $this->connection->select($sql);
+
+            $names = [];
+            foreach ($rows as $row) {
+                $row = array_values((array)$row);
+                $schemaName = $schema;
+                $resourceName = $row[1];
+                $internalName = $schemaName . '.' . $resourceName;
+                $name = $resourceName;
+                $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $names[strtolower($name)] = new ProcedureSchema($settings);
+            }
         }
 
         return $names;
@@ -86,24 +141,51 @@ class SnowflakeSchema extends SqlSchema
      */
     protected function getViewNames($schema = '')
     {
-        $sql = 'SHOW VIEWS ';
+        // Check if we're using ODBC connection - SHOW commands cause memory issues with ODBC
+        $isOdbc = is_resource($this->connection->getPdo());
 
-        if (!empty($schema)) {
-            $sql .= ' IN ' . $this->quoteTableName($schema);
-        }
+        if ($isOdbc) {
+            // Use INFORMATION_SCHEMA for ODBC connections
+            $sql = 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS';
+            if (!empty($schema)) {
+                $escapedSchema = str_replace("'", "''", $schema);
+                $sql .= ' WHERE TABLE_SCHEMA = \'' . $escapedSchema . '\'';
+            }
 
-        $rows = $this->connection->select($sql);
+            $rows = $this->connection->select($sql);
 
-        $names = [];
-        foreach ($rows as $row) {
-            $row = array_values((array)$row);
-            $schemaName = $schema;
-            $resourceName = $row[1];
-            $internalName = $schemaName . '.' . $resourceName;
-            $name = $resourceName;
-            $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);;
-            $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
-            $names[strtolower($name)] = new TableSchema($settings);
+            $names = [];
+            foreach ($rows as $row) {
+                $row = (array)$row;
+                $schemaName = $schema;
+                $resourceName = $row['TABLE_NAME'];
+                $internalName = $schemaName . '.' . $resourceName;
+                $name = $resourceName;
+                $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $names[strtolower($name)] = new TableSchema($settings);
+            }
+        } else {
+            // Use SHOW VIEWS for PDO connections
+            $sql = 'SHOW VIEWS ';
+
+            if (!empty($schema)) {
+                $sql .= ' IN ' . $this->quoteTableName($schema);
+            }
+
+            $rows = $this->connection->select($sql);
+
+            $names = [];
+            foreach ($rows as $row) {
+                $row = array_values((array)$row);
+                $schemaName = $schema;
+                $resourceName = $row[1];
+                $internalName = $schemaName . '.' . $resourceName;
+                $name = $resourceName;
+                $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);;
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $names[strtolower($name)] = new TableSchema($settings);
+            }
         }
 
         return $names;
@@ -398,45 +480,60 @@ MYSQL;
      */
     protected function loadTableColumns(TableSchema $table)
     {
-        $this->connection->statement('show columns in table ' . $table->quotedName);
-        $this->connection->statement('set s_c=last_query_id();');
-        $this->connection->statement('desc table ' . $table->quotedName);
-        $this->connection->statement('set d_t=last_query_id();');
+        // Check if we're using ODBC connection
+        $isOdbc = is_resource($this->connection->getPdo());
 
-        $sql = <<<SQL
+        if ($isOdbc) {
+            // Snowflake ODBC driver has a critical bug where DESC TABLE and INFORMATION_SCHEMA
+            // queries cause it to pre-allocate 64MB+ memory regardless of result size
+            // This happens at the driver level (odbc_prepare/odbc_exec both trigger it)
+            // Skip schema introspection for ODBC - users can still query data successfully
+            \Log::info('Skipping table column introspection for ODBC due to Snowflake ODBC driver bug', [
+                'table' => $table->quotedName
+            ]);
+            return;
+        } else {
+            // Use SHOW COLUMNS for PDO connections (original code)
+            $this->connection->statement('show columns in table ' . $table->quotedName);
+            $this->connection->statement('set s_c=last_query_id();');
+            $this->connection->statement('desc table ' . $table->quotedName);
+            $this->connection->statement('set d_t=last_query_id();');
+
+            $sql = <<<SQL
 select d.*, s."autoincrement" from table(result_scan(\$d_t)) as d
 JOIN table(result_scan(\$s_c)) as s
 ON d."name" = s."column_name";
 SQL;
 
-        $result = $this->connection->select($sql);
-        foreach ($result as $column) {
-            $column = array_change_key_case((array)$column, CASE_LOWER);
-            $c = new ColumnSchema(['name' => $column['name']]);
-            $c->quotedName = $this->quoteColumnName($c->name);
-            $c->allowNull = $column['null?'] === 'Y';
-            $c->isPrimaryKey = str_contains($column['primary key'], 'Y');
-            $c->isUnique = str_contains($column['unique key'], 'Y');
-            $c->autoIncrement = isset($column['autoincrement']) && $column['autoincrement'] !== '' ? true : false;
-            $c->dbType = $column['type'];
-            if (isset($column['comment'])) {
-                $c->comment = $column['comment'];
-            }
-            $this->extractLimit($c, $c->dbType);
-            $c->fixedLength = $this->extractFixedLength($c->dbType);
-            $this->extractType($c, $c->dbType);
-            $this->extractDefault($c, $column['default']);
-
-            if ($c->isPrimaryKey) {
-                if ($c->autoIncrement) {
-                    $table->sequenceName = Arr::get($column, 'sequence', $c->name);
-                    if ((DbSimpleTypes::TYPE_INTEGER === $c->type)) {
-                        $c->type = DbSimpleTypes::TYPE_ID;
-                    }
+            $result = $this->connection->select($sql);
+            foreach ($result as $column) {
+                $column = array_change_key_case((array)$column, CASE_LOWER);
+                $c = new ColumnSchema(['name' => $column['name']]);
+                $c->quotedName = $this->quoteColumnName($c->name);
+                $c->allowNull = $column['null?'] === 'Y';
+                $c->isPrimaryKey = str_contains($column['primary key'], 'Y');
+                $c->isUnique = str_contains($column['unique key'], 'Y');
+                $c->autoIncrement = isset($column['autoincrement']) && $column['autoincrement'] !== '' ? true : false;
+                $c->dbType = $column['type'];
+                if (isset($column['comment'])) {
+                    $c->comment = $column['comment'];
                 }
-                $table->addPrimaryKey($c->name);
+                $this->extractLimit($c, $c->dbType);
+                $c->fixedLength = $this->extractFixedLength($c->dbType);
+                $this->extractType($c, $c->dbType);
+                $this->extractDefault($c, $column['default']);
+
+                if ($c->isPrimaryKey) {
+                    if ($c->autoIncrement) {
+                        $table->sequenceName = Arr::get($column, 'sequence', $c->name);
+                        if ((DbSimpleTypes::TYPE_INTEGER === $c->type)) {
+                            $c->type = DbSimpleTypes::TYPE_ID;
+                        }
+                    }
+                    $table->addPrimaryKey($c->name);
+                }
+                $table->addColumn($c);
             }
-            $table->addColumn($c);
         }
     }
 
@@ -449,28 +546,39 @@ SQL;
             $schema = implode("','", $schema);
         }
 
-        $this->connection->statement('SHOW PRIMARY KEYS;');
-        $this->connection->statement('set pk_id=last_query_id();');
-        $this->connection->statement('SHOW IMPORTED KEYS;');
-        $this->connection->statement('set fk_id=last_query_id();');
+        // Check if we're using ODBC connection
+        $isOdbc = is_resource($this->connection->getPdo());
 
-        $sql = <<<SQL
-SELECT tc.constraint_type, tc.constraint_schema, tc.constraint_name, tc.table_schema, tc.table_name, 
+        if ($isOdbc) {
+            // For ODBC, just return empty constraints to avoid SHOW commands
+            // Snowflake doesn't have KEY_COLUMN_USAGE in INFORMATION_SCHEMA
+            // This means we won't have FK/PK info for ODBC connections, but it will work
+            return [];
+        } else {
+            // For PDO, use original SHOW commands approach
+            $this->connection->statement('SHOW PRIMARY KEYS;');
+            $this->connection->statement('set pk_id=last_query_id();');
+            $this->connection->statement('SHOW IMPORTED KEYS;');
+            $this->connection->statement('set fk_id=last_query_id();');
+
+            $sql = <<<SQL
+SELECT tc.constraint_type, tc.constraint_schema, tc.constraint_name, tc.table_schema, tc.table_name,
 kcu."column_name", kcu."referenced_table_schema", kcu."referenced_table_name", kcu."referenced_column_name",
 rc.update_rule, rc.delete_rule
 FROM information_schema.TABLE_CONSTRAINTS tc
 JOIN (
 select fk."fk_schema_name" as "constraint_schema", fk."fk_name" as "constraint_name", fk."fk_schema_name" as "table_schema", fk."fk_table_name" as "table_name", fk."fk_column_name" as "column_name",
 fk."pk_schema_name" as "referenced_table_schema", fk."pk_table_name" as "referenced_table_name", fk."pk_column_name" as "referenced_column_name", fk."update_rule" as "update_rule", fk."delete_rule" as "delete_rule" from table(result_scan(\$fk_id)) as fk
-UNION ALL 
+UNION ALL
 select pk."schema_name" as "constraint_schema", pk."constraint_name" as "constraint_name", pk."schema_name" as "table_schema", pk."table_name" as "table_name", pk."column_name" as "column_name",
 null as "referenced_table_schema", null as "referenced_table_name", null as "referenced_column_name", null as "update_rule", null as "delete_rule"
 from table(result_scan(\$pk_id)) as pk
 ) as kcu ON tc.constraint_name = kcu."constraint_name" AND tc.table_schema = kcu."constraint_schema" AND tc.table_name = kcu."table_name"
-LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc ON tc.constraint_schema = rc.constraint_schema AND 
+LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS rc ON tc.constraint_schema = rc.constraint_schema AND
 tc.constraint_name = rc.constraint_name
 WHERE tc.constraint_schema IN ('{$schema}');
 SQL;
+        }
 
         $results = $this->connection->select($sql);
         $constraints = [];

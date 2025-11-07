@@ -33,9 +33,21 @@ class SnowflakeOdbcConnection extends Connection
      */
     public function __construct($pdo, $database = '', $tablePrefix = '', array $config = [])
     {
-        $this->odbcConnection = $pdo;
+        $isResource = is_resource($pdo);
+        $resourceType = $isResource ? get_resource_type($pdo) : 'not a resource';
 
-        // Store connection details
+        \Log::info('[ODBC LIFECYCLE] Connection constructor called', [
+            'is_resource' => $isResource,
+            'resource_type' => $resourceType,
+            'database' => $database
+        ]);
+
+        // Store the ODBC connection resource in both places
+        $this->odbcConnection = $pdo;
+        $this->pdo = $pdo; // Also store in parent's property
+        $this->readPdo = $pdo; // And read PDO
+
+        // Store connection details WITHOUT calling parent (it expects PDO)
         $this->database = $database;
         $this->tablePrefix = $tablePrefix;
         $this->config = $config;
@@ -43,6 +55,11 @@ class SnowflakeOdbcConnection extends Connection
         // Set up query grammar and processor
         $this->useDefaultQueryGrammar();
         $this->useDefaultPostProcessor();
+
+        \Log::info('[ODBC LIFECYCLE] Connection constructor completed', [
+            'odbcConnection_valid' => is_resource($this->odbcConnection),
+            'pdo_valid' => is_resource($this->pdo),
+        ]);
     }
 
     /**
@@ -112,14 +129,21 @@ class SnowflakeOdbcConnection extends Connection
                 throw new \Exception("ODBC query failed: {$error}");
             }
 
-            // Fetch all results
+            // Fetch results
             $rows = [];
-            while ($row = odbc_fetch_array($result)) {
+            $numCols = odbc_num_fields($result);
+
+            while (odbc_fetch_row($result)) {
+                $row = [];
+                for ($i = 1; $i <= $numCols; $i++) {
+                    $fieldName = odbc_field_name($result, $i);
+                    $fieldValue = odbc_result($result, $i);
+                    $row[$fieldName] = $fieldValue;
+                }
                 $rows[] = (object) $row;
             }
 
             odbc_free_result($result);
-
             return $rows;
         });
     }
@@ -190,12 +214,44 @@ class SnowflakeOdbcConnection extends Connection
      */
     protected function odbcExecute($query, $bindings = [])
     {
+        \Log::info('[ODBC LIFECYCLE] odbcExecute called', [
+            'odbcConnection_valid' => is_resource($this->odbcConnection),
+            'odbcConnection_type' => is_resource($this->odbcConnection) ? get_resource_type($this->odbcConnection) : 'not a resource',
+            'pdo_valid' => is_resource($this->pdo),
+            'pdo_type' => is_resource($this->pdo) ? get_resource_type($this->pdo) : 'not a resource',
+            'query_preview' => substr($query, 0, 100)
+        ]);
+
         // Bind parameters to the query
         if (!empty($bindings)) {
             $query = $this->bindParameters($query, $bindings);
         }
 
-        return odbc_exec($this->odbcConnection, $query);
+        if (!is_resource($this->odbcConnection)) {
+            \Log::error('[ODBC LIFECYCLE] ODBC connection resource is invalid!', [
+                'odbcConnection' => $this->odbcConnection,
+                'pdo' => $this->pdo,
+                'readPdo' => $this->readPdo ?? 'not set'
+            ]);
+            throw new \Exception('ODBC connection resource is invalid');
+        }
+
+        \Log::debug('ODBC executing query', ['query' => substr($query, 0, 500), 'memory_before' => memory_get_usage(true)]);
+
+        // Try using odbc_prepare + odbc_execute instead of odbc_exec
+        // This might avoid Snowflake ODBC driver's massive pre-allocation bug
+        $stmt = @odbc_prepare($this->odbcConnection, $query);
+
+        if ($stmt === false) {
+            // Fallback to odbc_exec if prepare fails
+            $result = @odbc_exec($this->odbcConnection, $query);
+        } else {
+            $result = @odbc_execute($stmt) ? $stmt : false;
+        }
+
+        \Log::debug('ODBC query executed', ['success' => ($result !== false), 'memory_after' => memory_get_usage(true)]);
+
+        return $result;
     }
 
     /**
@@ -259,7 +315,38 @@ class SnowflakeOdbcConnection extends Connection
      */
     public function getPdo()
     {
+        \Log::info('[ODBC LIFECYCLE] getPdo() called', [
+            'odbcConnection_valid' => is_resource($this->odbcConnection),
+            'odbcConnection_type' => is_resource($this->odbcConnection) ? get_resource_type($this->odbcConnection) : 'not a resource',
+            'backtrace' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 3)
+        ]);
         return $this->odbcConnection;
+    }
+
+    /**
+     * Set the PDO connection (compatibility method for reconnector)
+     *
+     * @param  resource  $pdo
+     * @return void
+     */
+    public function setPdo($pdo)
+    {
+        $isResource = is_resource($pdo);
+        $resourceType = $isResource ? get_resource_type($pdo) : 'not a resource';
+
+        \Log::info('[ODBC LIFECYCLE] setPdo() called', [
+            'is_resource' => $isResource,
+            'resource_type' => $resourceType,
+            'backtrace' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5)
+        ]);
+
+        $this->odbcConnection = $pdo;
+        $this->pdo = $pdo;
+        $this->readPdo = $pdo;
+
+        \Log::info('[ODBC LIFECYCLE] setPdo() completed', [
+            'odbcConnection_valid' => is_resource($this->odbcConnection)
+        ]);
     }
 
     /**
@@ -269,11 +356,18 @@ class SnowflakeOdbcConnection extends Connection
      */
     public function disconnect()
     {
+        \Log::info('[ODBC LIFECYCLE] disconnect() called', [
+            'odbcConnection_valid_before' => is_resource($this->odbcConnection),
+            'backtrace' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5)
+        ]);
+
         if (is_resource($this->odbcConnection)) {
             odbc_close($this->odbcConnection);
         }
 
         $this->odbcConnection = null;
+
+        \Log::info('[ODBC LIFECYCLE] disconnect() completed');
     }
 
     /**
@@ -285,10 +379,21 @@ class SnowflakeOdbcConnection extends Connection
      */
     public function reconnect()
     {
+        \Log::info('[ODBC LIFECYCLE] reconnect() called', [
+            'has_reconnector' => is_callable($this->reconnector),
+            'odbcConnection_before' => is_resource($this->odbcConnection),
+            'backtrace' => debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 5)
+        ]);
+
         if (is_callable($this->reconnector)) {
-            return call_user_func($this->reconnector, $this);
+            $result = call_user_func($this->reconnector, $this);
+            \Log::info('[ODBC LIFECYCLE] reconnect() completed via reconnector', [
+                'odbcConnection_after' => is_resource($this->odbcConnection)
+            ]);
+            return $result;
         }
 
+        \Log::error('[ODBC LIFECYCLE] reconnect() failed - no reconnector available');
         throw new \LogicException('Lost ODBC connection and no reconnector available.');
     }
 }

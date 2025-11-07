@@ -130,6 +130,8 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
         // Check for SPCS environment variables (when running in Snowpark Container Services)
         $spcsHost = getenv('SNOWFLAKE_HOST');
         $spcsAccount = getenv('SNOWFLAKE_ACCOUNT');
+        $spcsTokenFile = '/snowflake/session/token';
+        $spcsTokenExists = file_exists($spcsTokenFile);
 
         \Log::info('SNOWFLAKE_HOST environment variable', [
             'exists' => $spcsHost !== false,
@@ -143,6 +145,12 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
             'value' => $spcsAccount ?: 'NOT SET',
             'is_empty' => empty($spcsAccount),
             'type' => gettype($spcsAccount)
+        ]);
+
+        \Log::info('SPCS OAuth token file check', [
+            'path' => $spcsTokenFile,
+            'exists' => $spcsTokenExists,
+            'readable' => $spcsTokenExists && is_readable($spcsTokenFile)
         ]);
 
         // Log ALL environment variables starting with SNOWFLAKE
@@ -164,41 +172,84 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
         ];
         \Log::info('Container environment context', $containerEnvVars);
 
+        // Check if we're running inside SPCS and should use internal connectivity
+        // Token should already be loaded by SnowflakeOAuthController if OAuth flow was used
+        $usingSPCSInternal = false;
         if ($spcsHost && $spcsAccount) {
-            \Log::info('✅ SPCS environment detected! Using SNOWFLAKE_HOST and SNOWFLAKE_ACCOUNT', [
+            \Log::info('SPCS environment detected - will use internal connectivity', [
                 'host' => $spcsHost,
-                'account' => $spcsAccount
+                'account' => $spcsAccount,
+                'has_oauth_token' => !empty($config['oauth_access_token'])
             ]);
+            $usingSPCSInternal = true;
+
+            // If we don't have an OAuth token yet, try reading it from the file
+            if (empty($config['oauth_access_token']) && $spcsTokenExists && is_readable($spcsTokenFile)) {
+                $spcsOAuthToken = trim(file_get_contents($spcsTokenFile));
+                if (!empty($spcsOAuthToken)) {
+                    $config['oauth_access_token'] = $spcsOAuthToken;
+                    $config['authenticator'] = 'oauth';
+                    \Log::info('SPCS OAuth token loaded from file', [
+                        'token_length' => strlen($spcsOAuthToken)
+                    ]);
+                } else {
+                    \Log::error('SPCS token file exists but is empty');
+                }
+            }
         } else {
-            \Log::warning('❌ SPCS environment variables NOT found or empty!', [
-                'SNOWFLAKE_HOST_exists' => $spcsHost !== false,
-                'SNOWFLAKE_ACCOUNT_exists' => $spcsAccount !== false,
-                'will_use_config_values' => true
+            \Log::info('Not in SPCS environment - using external connection', [
+                'SNOWFLAKE_HOST_set' => $spcsHost !== false,
+                'SNOWFLAKE_ACCOUNT_set' => $spcsAccount !== false
             ]);
         }
 
         // Add server/account information
-        // Priority: SPCS env vars > account_locator > account > hostname
-        $accountForServer = $spcsAccount ?: ($config['account'] ?? null);
-        $serverHostname = $spcsHost ?: ($config['hostname'] ?? null);
+        // CRITICAL: When using SPCS internal connectivity, we MUST use SPCS environment variables
+        // Priority: SPCS env vars (if in SPCS) > config values (external connections)
+        if ($usingSPCSInternal) {
+            // SPCS internal connection - MUST use SPCS environment variables
+            $accountForServer = $spcsAccount;
+            $serverHostname = $spcsHost;
 
-        \Log::info('Final account/hostname selection', [
-            'accountForServer' => $accountForServer,
-            'serverHostname' => $serverHostname,
-            'source_account' => $spcsAccount ? 'SPCS env' : 'config',
-            'source_hostname' => $spcsHost ? 'SPCS env' : 'config'
-        ]);
+            \Log::info('[SPCS INTERNAL] Using SPCS environment variables for connectivity', [
+                'accountForServer' => $accountForServer,
+                'serverHostname' => $serverHostname,
+                'source' => 'SPCS environment variables'
+            ]);
+        } else {
+            // External connection - use config values
+            $accountForServer = $config['account'] ?? null;
+            $serverHostname = $config['hostname'] ?? null;
 
-        if ($authenticator === 'oauth' && !empty($config['account_locator']) && !$spcsAccount) {
-            $accountForServer = strtolower($config['account_locator']);
-            \Log::info('Using account_locator for OAuth', ['account' => $accountForServer]);
+            // For OAuth, prefer the 'account' field as it typically has the full locator
+            // Don't override with account_locator unless account is not set
+            $authenticatorCheck = $config['authenticator'] ?? 'snowflake';
+            if ($authenticatorCheck === 'oauth' && empty($accountForServer) && !empty($config['account_locator'])) {
+                $accountForServer = strtolower($config['account_locator']);
+                \Log::info('Using account_locator for OAuth (account was empty)', ['account' => $accountForServer]);
+            }
+
+            \Log::info('[EXTERNAL] Using config values for connectivity', [
+                'accountForServer' => $accountForServer,
+                'serverHostname' => $serverHostname,
+                'source' => 'configuration values',
+                'account_from_config' => $config['account'] ?? 'not set',
+                'account_locator_from_config' => $config['account_locator'] ?? 'not set'
+            ]);
         }
 
         // ODBC requires Server parameter - use SPCS host if available, otherwise construct
         if (!empty($serverHostname)) {
             $dsn .= "Server={$serverHostname};";
         } elseif (!empty($accountForServer)) {
-            // Construct server URL from account name
+            // CRITICAL: Only construct external hostname if NOT in SPCS mode
+            if ($usingSPCSInternal) {
+                throw new \InvalidArgumentException(
+                    "SPCS internal connectivity detected but SNOWFLAKE_HOST environment variable is not set. " .
+                    "Please ensure your service has executeAsCaller enabled in the service specification."
+                );
+            }
+            // Construct server URL from account name (external connections only)
             $server = "{$accountForServer}.snowflakecomputing.com";
             $dsn .= "Server={$server};";
         } else {

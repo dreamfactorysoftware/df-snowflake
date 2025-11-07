@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Snowflake OAuth Authorization</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .container {
+            background: #f5f5f5;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            width: 100%;
+            margin-top: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 4px;
+            display: none;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        pre {
+            background: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Snowflake OAuth Authorization</h1>
+        <p>Use this tool to authorize DreamFactory to access your Snowflake account via OAuth.</p>
+
+        <div>
+            <label for="apiUrl">DreamFactory API URL:</label>
+            <input type="text" id="apiUrl" placeholder="https://your-dreamfactory.com"
+                   value="http://localhost" />
+        </div>
+
+        <div>
+            <label for="apiKey">API Key:</label>
+            <input type="text" id="apiKey" placeholder="Your DreamFactory API key" />
+        </div>
+
+        <div>
+            <label for="email">Admin Email:</label>
+            <input type="email" id="email" placeholder="admin@example.com" />
+        </div>
+
+        <div>
+            <label for="password">Admin Password:</label>
+            <input type="password" id="password" placeholder="Your password" />
+        </div>
+
+        <div>
+            <label for="serviceId">Snowflake Service ID:</label>
+            <input type="number" id="serviceId" placeholder="e.g., 5" />
+        </div>
+
+        <button onclick="checkStatus()">Check OAuth Status</button>
+        <button onclick="authorize()">Authorize with Snowflake</button>
+
+        <div id="status" class="status"></div>
+    </div>
+
+    <script>
+        let sessionToken = null;
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.className = `status ${type}`;
+            statusDiv.innerHTML = message;
+            statusDiv.style.display = 'block';
+        }
+
+        async function login() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+
+            if (!apiUrl || !apiKey || !email || !password) {
+                return false;
+            }
+
+            try {
+                const response = await fetch(`${apiUrl}/api/v2/system/admin/session`, {
+                    method: 'POST',
+                    headers: {
+                        'X-DreamFactory-API-Key': apiKey,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ email, password })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    sessionToken = data.session_token;
+                    return true;
+                } else {
+                    showStatus('Login failed. Check your credentials.', 'error');
+                    return false;
+                }
+            } catch (error) {
+                showStatus(`Login error: ${error.message}`, 'error');
+                return false;
+            }
+        }
+
+        function getHeaders() {
+            const apiKey = document.getElementById('apiKey').value;
+            const headers = {
+                'X-DreamFactory-API-Key': apiKey
+            };
+            if (sessionToken) {
+                headers['X-DreamFactory-Session-Token'] = sessionToken;
+            }
+            return headers;
+        }
+
+        async function checkStatus() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const serviceId = document.getElementById('serviceId').value;
+
+            if (!apiUrl || !apiKey || !serviceId) {
+                showStatus('Please fill in all fields', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(
+                    `${apiUrl}/api/v2/_oauth/snowflake/status?service_id=${serviceId}`,
+                    {
+                        headers: {
+                            'X-DreamFactory-API-Key': apiKey
+                        }
+                    }
+                );
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    let message = '<h3>OAuth Status:</h3><ul>';
+                    message += `<li>Configured: ${data.configured ? '✅' : '❌'}</li>`;
+                    message += `<li>Authorized: ${data.authorized ? '✅' : '❌'}</li>`;
+                    if (data.expires_at) {
+                        message += `<li>Expires: ${data.expires_at}</li>`;
+                        message += `<li>Expired: ${data.is_expired ? '❌ Yes' : '✅ No'}</li>`;
+                    }
+                    message += '</ul>';
+
+                    if (!data.configured) {
+                        message += '<p><strong>Action needed:</strong> Configure OAuth Client ID and Secret in service settings</p>';
+                    } else if (!data.authorized) {
+                        message += '<p><strong>Action needed:</strong> Click "Authorize with Snowflake" button</p>';
+                    } else if (data.is_expired) {
+                        message += '<p><strong>Warning:</strong> Token expired. Click "Authorize with Snowflake" to refresh</p>';
+                    } else {
+                        message += '<p><strong>Status:</strong> ✅ OAuth is working!</p>';
+                    }
+
+                    showStatus(message, 'info');
+                } else {
+                    const errorMsg = data.error?.message || data.error || JSON.stringify(data);
+                    showStatus(`Error: ${errorMsg}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`Network error: ${error.message || error.toString()}`, 'error');
+            }
+        }
+
+        async function authorize() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const apiKey = document.getElementById('apiKey').value;
+            const serviceId = document.getElementById('serviceId').value;
+
+            if (!apiUrl || !apiKey || !serviceId) {
+                showStatus('Please fill in all fields', 'error');
+                return;
+            }
+
+            showStatus('Getting authorization URL...', 'info');
+
+            try {
+                const response = await fetch(
+                    `${apiUrl}/api/v2/_oauth/snowflake/authorize?service_id=${serviceId}`,
+                    {
+                        headers: {
+                            'X-DreamFactory-API-Key': apiKey
+                        }
+                    }
+                );
+
+                const data = await response.json();
+
+                if (response.ok && data.authorization_url) {
+                    showStatus(`
+                        <p>Opening Snowflake authorization page...</p>
+                        <p><small>If popup blocked, <a href="${data.authorization_url}" target="_blank">click here</a></small></p>
+                    `, 'info');
+
+                    // Open authorization URL in new window
+                    const authWindow = window.open(
+                        data.authorization_url,
+                        'SnowflakeOAuth',
+                        'width=600,height=700'
+                    );
+
+                    // Poll for completion
+                    const pollInterval = setInterval(async () => {
+                        try {
+                            const statusResponse = await fetch(
+                                `${apiUrl}/api/v2/_oauth/snowflake/status?service_id=${serviceId}`,
+                                {
+                                    headers: {
+                                        'X-DreamFactory-API-Key': apiKey
+                                    }
+                                }
+                            );
+
+                            const statusData = await statusResponse.json();
+
+                            if (statusData.authorized) {
+                                clearInterval(pollInterval);
+                                if (authWindow && !authWindow.closed) {
+                                    authWindow.close();
+                                }
+                                showStatus('✅ Authorization successful! Your Snowflake service is now connected.', 'success');
+                            }
+                        } catch (e) {
+                            // Continue polling
+                        }
+                    }, 2000);
+
+                    // Stop polling after 5 minutes
+                    setTimeout(() => {
+                        clearInterval(pollInterval);
+                    }, 300000);
+
+                } else {
+                    const errorMsg = data.error?.message || data.error || JSON.stringify(data);
+                    showStatus(`Error: ${errorMsg}`, 'error');
+                }
+            } catch (error) {
+                showStatus(`Network error: ${error.message || error.toString()}`, 'error');
+            }
+        }
+    </script>
+</body>
+</html>
