@@ -33,12 +33,15 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
     public static function getDefaultConnectionInfo()
     {
         $defaults = [
+            // Step 1: ODBC Toggle (affects everything)
             [
                 'name' => 'use_odbc',
                 'label' => 'Use ODBC Driver',
                 'type' => 'boolean',
                 'description' => 'Enable to use ODBC driver instead of PDO. Required for OAuth authentication.'
             ],
+
+            // Step 2: Authentication Method Selector
             [
                 'name' => 'authenticator',
                 'label' => 'Authentication Method',
@@ -51,30 +54,22 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 ],
                 'description' => 'Choose the authentication method for connecting to Snowflake.'
             ],
-            [
-                'name' => 'hostname',
-                'label' => 'Hostname',
-                'type' => 'string',
-                'description' => 'Snowflake hostname, This can be alternative snowflake hostname (Optional).'
-            ],
-            [
-                'name' => 'account',
-                'label' => 'Account',
-                'type' => 'string',
-                'description' => 'Your Snowflake account identifier (e.g., UCZWIRU-JUB93638). This is used for ODBC connections (<a href="https://docs.snowflake.com/en/user-guide/connecting.html#your-snowflake-account-name">doc</a>).'
-            ],
-            [
-                'name' => 'account_locator',
-                'label' => 'Account Locator',
-                'type' => 'string',
-                'description' => 'Your Snowflake account locator (e.g., njb13282). Required only for OAuth authentication. Leave blank for non-OAuth connections.'
-            ],
+
+            // Step 3a: Username/Password Authentication Fields
             [
                 'name' => 'username',
                 'label' => 'Username',
                 'type' => 'string',
-                'description' => 'The name of the snowflake account user. This can be a lookup key.'
+                'description' => 'The name of the Snowflake account user. This can be a lookup key.'
             ],
+            [
+                'name' => 'password',
+                'label' => 'Password',
+                'type' => 'password',
+                'description' => 'The password for the Snowflake account user. This can be a lookup key. Required for Username/Password authentication.'
+            ],
+
+            // Step 3b: Key Pair (JWT) Authentication Fields
             [
                 'name' => 'key',
                 'label' => 'Private Key File',
@@ -84,61 +79,27 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                     'For information on creating key pairs, see <a href="https://docs.snowflake.com/en/user-guide/key-pair-auth" target="_blank">Snowflake Key Pair Authentication</a>.'
             ],
             [
-                'name' => 'password',
-                'label' => 'Password',
-                'type' => 'password',
-                'description' => 'The password for the snowflake account user. This can be a lookup key. ' .
-                    'If you are using key pair or OAuth authentication, leave this blank.'
-            ],
-            [
                 'name' => 'passcode',
                 'label' => 'Private Key Passphrase',
                 'type' => 'password',
-                'description' => 'If your private key file is encrypted, specify the passphrase here. ' .
-                    'Leave blank if your private key is not encrypted.'
+                'description' => 'If your private key file is encrypted, specify the passphrase here. Leave blank if your private key is not encrypted.'
             ],
+
+            // Step 3c: OAuth Authentication Fields
             [
                 'name' => 'oauth_client_id',
                 'label' => 'OAuth Client ID',
                 'type' => 'string',
-                'description' => 'OAuth 2.0 Client ID for OAuth authentication.'
-            ],
-            [
-                'name' => 'oauth_client_secret',
-                'label' => 'OAuth Client Secret (Deprecated)',
-                'type' => 'password',
-                'description' => 'DEPRECATED: Use oauth_client_secret_raw instead. This field has a truncation bug.'
+                'description' => 'OAuth 2.0 Client ID for OAuth authentication. Required when using OAuth.'
             ],
             [
                 'name' => 'oauth_client_secret_raw',
                 'label' => 'OAuth Client Secret',
                 'type' => 'password',
-                'description' => 'OAuth 2.0 Client Secret for OAuth authentication (unencrypted workaround for truncation bug).'
+                'description' => 'OAuth 2.0 Client Secret for OAuth authentication. Required when using OAuth.'
             ],
-            [
-                'name' => 'oauth_access_token',
-                'label' => 'OAuth Access Token',
-                'type' => 'password',
-                'description' => 'Current OAuth access token (auto-populated after authorization).'
-            ],
-            [
-                'name' => 'oauth_refresh_token',
-                'label' => 'OAuth Refresh Token',
-                'type' => 'password',
-                'description' => 'OAuth refresh token (auto-populated after authorization).'
-            ],
-            [
-                'name' => 'oauth_token_expires_at',
-                'label' => 'OAuth Token Expiration',
-                'type' => 'string',
-                'description' => 'Token expiration timestamp (auto-populated).'
-            ],
-            [
-                'name' => 'role',
-                'label' => 'Role',
-                'type' => 'string',
-                'description' => 'User\'s role.'
-            ],
+
+            // Step 4: Connection Details (always visible)
             [
                 'name' => 'database',
                 'label' => 'Database',
@@ -146,17 +107,62 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 'description' => 'The name of the database to connect to on the given server. This can be a lookup key.'
             ],
             [
+                'name' => 'schema',
+                'label' => 'Schema',
+                'type' => 'string',
+                'description' => 'Leave blank to work with the default schema or type in a specific schema to use for this service.'
+            ],
+            [
+                'name' => 'role',
+                'label' => 'Role',
+                'type' => 'string',
+                'description' => 'User\'s role to use for this connection.'
+            ],
+            [
                 'name' => 'warehouse',
                 'label' => 'Warehouse',
                 'type' => 'string',
                 'description' => 'The name of the warehouse your database uses.'
             ],
+
+            // Advanced Settings (move to separate section)
             [
-                'name' => 'schema',
-                'label' => 'Schema',
+                'name' => 'hostname',
+                'label' => 'Hostname (Advanced)',
                 'type' => 'string',
-                'description' => 'Leave blank to work with the default schema ' .
-                    'or type in a specific schema to use for this service.'
+                'description' => 'Snowflake hostname. This can be an alternative Snowflake hostname (Optional). Leave blank to use default based on account.'
+            ],
+            [
+                'name' => 'account',
+                'label' => 'Account (Advanced)',
+                'type' => 'string',
+                'description' => 'Your Snowflake account identifier (e.g., UCZWIRU-JUB93638). This is used for ODBC connections. (<a href="https://docs.snowflake.com/en/user-guide/connecting.html#your-snowflake-account-name" target="_blank">doc</a>)'
+            ],
+            [
+                'name' => 'account_locator',
+                'label' => 'Account Locator (Advanced)',
+                'type' => 'string',
+                'description' => 'Your Snowflake account locator (e.g., njb13282). Required only for OAuth authentication. Leave blank for non-OAuth connections.'
+            ],
+
+            // OAuth Token Fields (read-only, auto-populated)
+            [
+                'name' => 'oauth_access_token',
+                'label' => 'OAuth Access Token (Auto-populated)',
+                'type' => 'password',
+                'description' => 'Current OAuth access token (auto-populated after authorization via the OAuth panel below).'
+            ],
+            [
+                'name' => 'oauth_refresh_token',
+                'label' => 'OAuth Refresh Token (Auto-populated)',
+                'type' => 'password',
+                'description' => 'OAuth refresh token (auto-populated after authorization).'
+            ],
+            [
+                'name' => 'oauth_token_expires_at',
+                'label' => 'OAuth Token Expiration (Auto-populated)',
+                'type' => 'string',
+                'description' => 'Token expiration timestamp (auto-populated).'
             ]
         ];
         return $defaults;
@@ -179,5 +185,70 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
         array_push($schema, $cacheTtl);     // Restore cache TTL
 
         return $schema;
+    }
+
+    /**
+     * {@inheritdoc}
+     */
+    protected static function prepareConfigSchemaField(array &$schema)
+    {
+        parent::prepareConfigSchemaField($schema);
+
+        switch ($schema['name']) {
+            case 'hostname':
+            case 'account':
+            case 'account_locator':
+            case 'username':
+            case 'password':
+            case 'key':
+            case 'passcode':
+            case 'database':
+            case 'warehouse':
+            case 'schema':
+            case 'role':
+            case 'authenticator':
+            case 'oauth_client_id':
+            case 'oauth_client_secret_raw':
+            case 'oauth_access_token':
+            case 'oauth_refresh_token':
+            case 'oauth_token_expires_at':
+            case 'use_odbc':
+                $schema['description'] = array_get($schema, 'description', '');
+                break;
+        }
+    }
+
+    /**
+     * Apply native app auto-configuration if requested
+     *
+     * @param array $record
+     * @return array
+     */
+    protected static function beforeSave(&$record)
+    {
+        // Check if auto-configuration is requested
+        if (isset($record['auto_configure_native_app']) && $record['auto_configure_native_app']) {
+            \Log::info('Auto-configuring Snowflake service from native app environment');
+
+            // Import the utility class
+            $nativeAppUtility = 'DreamFactory\Core\Snowflake\Utility\SnowflakeNativeAppDetector';
+
+            if (class_exists($nativeAppUtility)) {
+                // Merge native app config with user-provided values
+                // User-provided values take precedence
+                $record = call_user_func([$nativeAppUtility, 'mergeWithUserConfig'], $record);
+
+                \Log::info('Native app auto-configuration applied', [
+                    'has_account' => !empty($record['account']),
+                    'has_oauth_client_id' => !empty($record['oauth_client_id']),
+                    'has_database' => !empty($record['database'])
+                ]);
+            }
+
+            // Remove the auto-configure flag so it doesn't get saved
+            unset($record['auto_configure_native_app']);
+        }
+
+        return $record;
     }
 }
