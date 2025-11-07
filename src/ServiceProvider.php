@@ -53,8 +53,16 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                     // Use ODBC connector
                     \Log::info('Using SnowflakeOdbcConnector');
                     $connector = new SnowflakeOdbcConnector();
-                    $connection = $connector->connect($config);
-                    return new SnowflakeOdbcConnection($connection, $config['database'], '', $config);
+                    $odbcResource = $connector->connect($config);
+                    $connection = new SnowflakeOdbcConnection($odbcResource, $config['database'], '', $config);
+
+                    // Set up reconnector to handle Laravel connection lifecycle
+                    $connection->setReconnector(function ($connection) use ($connector, $config) {
+                        $odbcResource = $connector->connect($config);
+                        $connection->setPdo($odbcResource);
+                    });
+
+                    return $connection;
                 } else {
                     // Use PDO connector (legacy)
                     \Log::info('Using SnowflakeConnector (PDO)');
