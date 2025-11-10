@@ -238,16 +238,10 @@ class SnowflakeOdbcConnection extends Connection
 
         \Log::debug('ODBC executing query', ['query' => substr($query, 0, 500), 'memory_before' => memory_get_usage(true)]);
 
-        // Try using odbc_prepare + odbc_execute instead of odbc_exec
-        // This might avoid Snowflake ODBC driver's massive pre-allocation bug
-        $stmt = @odbc_prepare($this->odbcConnection, $query);
-
-        if ($stmt === false) {
-            // Fallback to odbc_exec if prepare fails
-            $result = @odbc_exec($this->odbcConnection, $query);
-        } else {
-            $result = @odbc_execute($stmt) ? $stmt : false;
-        }
+        // Use odbc_exec directly to avoid Snowflake ODBC driver's massive pre-allocation bug
+        // odbc_prepare can cause memory exhaustion (trying to allocate 64MB+) when dealing with
+        // large result sets like INFORMATION_SCHEMA queries for tables/views/procedures
+        $result = @odbc_exec($this->odbcConnection, $query);
 
         \Log::debug('ODBC query executed', ['success' => ($result !== false), 'memory_after' => memory_get_usage(true)]);
 
