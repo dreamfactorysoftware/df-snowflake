@@ -84,8 +84,19 @@ class SnowflakeOAuthController extends Controller
         // Convert to lowercase for OAuth URLs
         $accountForOAuth = strtolower($accountForOAuth);
 
-        if (!$clientId || !$accountForOAuth) {
-            return response()->json(['error' => 'OAuth not configured. Set oauth_client_id and account_locator (or account).'], 400);
+        // Only require account - client_id may be auto-configured in native app
+        if (!$accountForOAuth) {
+            return response()->json(['error' => 'OAuth not configured. Set account_locator (or account).'], 400);
+        }
+
+        // If no client_id, this is likely a native app deployment
+        if (!$clientId) {
+            return response()->json([
+                'success' => true,
+                'message' => 'OAuth will be auto-configured when deployed to Snowflake Native App (SPCS). No client_id required.',
+                'native_app_mode' => true,
+                'account' => $accountForOAuth
+            ]);
         }
 
         // Build authorization URL
