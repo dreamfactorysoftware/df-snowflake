@@ -484,14 +484,83 @@ MYSQL;
         $isOdbc = is_resource($this->connection->getPdo());
 
         if ($isOdbc) {
-            // Snowflake ODBC driver has a critical bug where DESC TABLE and INFORMATION_SCHEMA
-            // queries cause it to pre-allocate 64MB+ memory regardless of result size
-            // This happens at the driver level (odbc_prepare/odbc_exec both trigger it)
-            // Skip schema introspection for ODBC - users can still query data successfully
-            \Log::info('Skipping table column introspection for ODBC due to Snowflake ODBC driver bug', [
-                'table' => $table->quotedName
+            // Use INFORMATION_SCHEMA for ODBC connections to avoid SHOW commands
+            // Parse schema and table name from quotedName
+            $parts = explode('.', str_replace(['"', '`', '[', ']'], '', $table->quotedName));
+            $schemaName = count($parts) > 1 ? $parts[0] : $table->schemaName;
+            $tableName = count($parts) > 1 ? $parts[1] : $parts[0];
+
+            // Manually escape values since quoteValue() expects PDO
+            $escapedSchema = str_replace("'", "''", $schemaName);
+            $escapedTable = str_replace("'", "''", $tableName);
+
+            $sql = <<<SQL
+SELECT
+    COLUMN_NAME,
+    DATA_TYPE,
+    IS_NULLABLE,
+    COLUMN_DEFAULT,
+    CHARACTER_MAXIMUM_LENGTH,
+    NUMERIC_PRECISION,
+    NUMERIC_SCALE,
+    COMMENT,
+    ORDINAL_POSITION,
+    IS_IDENTITY
+FROM INFORMATION_SCHEMA.COLUMNS
+WHERE TABLE_SCHEMA = '{$escapedSchema}'
+AND TABLE_NAME = '{$escapedTable}'
+ORDER BY ORDINAL_POSITION
+SQL;
+
+            \Log::info('Loading table columns for ODBC using INFORMATION_SCHEMA', [
+                'table' => $table->quotedName,
+                'schema' => $schemaName,
+                'table_name' => $tableName
             ]);
-            return;
+
+            $result = $this->connection->select($sql);
+
+            foreach ($result as $column) {
+                $column = array_change_key_case((array)$column, CASE_LOWER);
+                $c = new ColumnSchema(['name' => $column['column_name']]);
+                $c->quotedName = $this->quoteColumnName($c->name);
+                $c->allowNull = ($column['is_nullable'] === 'YES');
+                $c->dbType = $column['data_type'];
+                $c->autoIncrement = isset($column['is_identity']) && $column['is_identity'] === 'YES';
+
+                if (isset($column['comment']) && !empty($column['comment'])) {
+                    $c->comment = $column['comment'];
+                }
+
+                // Set size/precision based on data type
+                if (isset($column['character_maximum_length'])) {
+                    $c->size = (int)$column['character_maximum_length'];
+                }
+                if (isset($column['numeric_precision'])) {
+                    $c->precision = (int)$column['numeric_precision'];
+                }
+                if (isset($column['numeric_scale'])) {
+                    $c->scale = (int)$column['numeric_scale'];
+                }
+
+                $this->extractLimit($c, $c->dbType);
+                $c->fixedLength = $this->extractFixedLength($c->dbType);
+                $this->extractType($c, $c->dbType);
+                $this->extractDefault($c, $column['column_default']);
+
+                // Note: Primary key info not available via INFORMATION_SCHEMA.COLUMNS in Snowflake
+                // Would need separate query to INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+                // For now, auto-increment columns are likely primary keys
+                if ($c->autoIncrement) {
+                    $c->isPrimaryKey = true;
+                    $table->addPrimaryKey($c->name);
+                    if ((DbSimpleTypes::TYPE_INTEGER === $c->type)) {
+                        $c->type = DbSimpleTypes::TYPE_ID;
+                    }
+                }
+
+                $table->addColumn($c);
+            }
         } else {
             // Use SHOW COLUMNS for PDO connections (original code)
             $this->connection->statement('show columns in table ' . $table->quotedName);
