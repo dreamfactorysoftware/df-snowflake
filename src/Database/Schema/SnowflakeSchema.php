@@ -218,6 +218,7 @@ class SnowflakeSchema extends SqlSchema
      */
     protected function getRoutineNames($type, $schema = '')
     {
+        $bindings = [];
         $where = $type . '_SCHEMA = :schema';
         if (!empty($schema)) {
             $bindings[':schema'] = $schema;
