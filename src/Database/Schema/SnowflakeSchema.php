@@ -218,16 +218,37 @@ class SnowflakeSchema extends SqlSchema
      */
     protected function getRoutineNames($type, $schema = '')
     {
-        $bindings = [];
-        $where = $type . '_SCHEMA = :schema';
-        if (!empty($schema)) {
-            $bindings[':schema'] = $schema;
-        }
-        $sql = <<<MYSQL
+        // Check if we're using ODBC connection - bind variables don't work with ODBC
+        $isOdbc = is_resource($this->connection->getPdo());
+
+        if ($isOdbc) {
+            // For ODBC, manually escape and insert the value
+            if (!empty($schema)) {
+                $escapedSchema = str_replace("'", "''", $schema);
+                $where = "{$type}_SCHEMA = '{$escapedSchema}'";
+            } else {
+                // If schema is empty, we still need a WHERE clause - get current schema
+                $where = "{$type}_SCHEMA = CURRENT_SCHEMA()";
+            }
+
+            $sql = <<<MYSQL
 SELECT {$type}_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.{$type}S WHERE {$where}
 MYSQL;
 
-        $rows = $this->connection->select($sql, $bindings);
+            $rows = $this->connection->select($sql);
+        } else {
+            // For PDO, use bind parameters
+            $bindings = [];
+            $where = $type . '_SCHEMA = :schema';
+            if (!empty($schema)) {
+                $bindings[':schema'] = $schema;
+            }
+            $sql = <<<MYSQL
+SELECT {$type}_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.{$type}S WHERE {$where}
+MYSQL;
+
+            $rows = $this->connection->select($sql, $bindings);
+        }
 
         $names = [];
         foreach ($rows as $row) {
