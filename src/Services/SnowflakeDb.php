@@ -8,9 +8,6 @@ use DreamFactory\Core\Snowflake\Resources\SnowflakeTable as Table;
 use DreamFactory\Core\SqlDb\Services\SqlDb;
 use DreamFactory\Core\SqlDb\Resources\StoredProcedure;
 use DreamFactory\Core\SqlDb\Resources\StoredFunction;
-use DreamFactory\Core\Exceptions\TooManyRequestsException;
-use Illuminate\Support\Facades\DB;
-use Carbon\Carbon;
 use Arr;
 
 /**
@@ -20,65 +17,12 @@ use Arr;
  */
 class SnowflakeDb extends SqlDb
 {
-    /**
-     * Default daily request limit for Snowflake Marketplace free edition
-     */
-    const DEFAULT_DAILY_LIMIT = 50;
-
-    /**
-     * Default upgrade contact email
-     */
-    const DEFAULT_UPGRADE_EMAIL = 'snowflake@dreamfactory.com';
-
     public function __construct($settings = [])
     {
         parent::__construct($settings);
 
         $prefix = parent::getConfigBasedCachePrefix();
         $this->setConfigBasedCachePrefix($prefix);
-    }
-
-    /**
-     * Check marketplace limits before processing requests
-     * ALWAYS ACTIVE - designed for dedicated Snowflake Marketplace builds
-     *
-     * @throws TooManyRequestsException
-     */
-    protected function preProcess()
-    {
-        // Exclude metadata/documentation requests from limiting
-        // These include OpenAPI specs, schema info, and describe operations
-        $request = request();
-        if (!$request->has('file') && !$request->has('schema') && !$request->has('describe')) {
-            $this->checkMarketplaceLimit();
-        }
-
-        parent::preProcess();
-    }
-
-    /**
-     * Check if marketplace request limit has been reached
-     *
-     * @throws TooManyRequestsException
-     */
-    protected function checkMarketplaceLimit()
-    {
-        $today = Carbon::now()->toDateString();
-        $limit = (int) env('SNOWFLAKE_DAILY_REQUEST_LIMIT', self::DEFAULT_DAILY_LIMIT);
-
-        $usage = DB::table('snowflake_marketplace_usage')
-            ->where('usage_date', $today)
-            ->first();
-
-        if ($usage && $usage->request_count >= $limit) {
-            $upgradeEmail = env('SNOWFLAKE_UPGRADE_EMAIL', self::DEFAULT_UPGRADE_EMAIL);
-
-            throw new TooManyRequestsException(
-                "Daily request limit of {$limit} exceeded. " .
-                "Contact {$upgradeEmail} to upgrade to unlimited requests. " .
-                "Limit resets at {$usage->reset_at}."
-            );
-        }
     }
 
     public static function adaptConfig(array &$config)
