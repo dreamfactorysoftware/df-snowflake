@@ -183,13 +183,14 @@ class SnowflakeOdbcConnector extends Connector implements ConnectorInterface
             ]);
             $usingSPCSInternal = true;
 
-            // If we don't have an OAuth token yet, try reading it from the file
-            if (empty($config['oauth_access_token']) && $spcsTokenExists && is_readable($spcsTokenFile)) {
+            // In SPCS mode, ALWAYS read fresh token from file (Snowflake keeps it updated)
+            // This fixes token expiration issues - the cached config token can become stale
+            if ($spcsTokenExists && is_readable($spcsTokenFile)) {
                 $spcsOAuthToken = trim(file_get_contents($spcsTokenFile));
                 if (!empty($spcsOAuthToken)) {
                     $config['oauth_access_token'] = $spcsOAuthToken;
                     $config['authenticator'] = 'oauth';
-                    \Log::info('SPCS OAuth token loaded from file', [
+                    \Log::info('SPCS OAuth token loaded fresh from file', [
                         'token_length' => strlen($spcsOAuthToken)
                     ]);
                 } else {
