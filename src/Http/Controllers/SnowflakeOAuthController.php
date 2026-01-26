@@ -3,6 +3,7 @@
 namespace DreamFactory\Core\Snowflake\Http\Controllers;
 
 use DreamFactory\Core\Models\Service;
+use DreamFactory\Core\Snowflake\Utility\SnowflakeNativeAppDetector;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 
@@ -397,12 +398,60 @@ class SnowflakeOAuthController extends Controller
         $expiresAt = $config['oauth_token_expires_at'] ?? null;
         $isExpired = $expiresAt ? now()->isAfter($expiresAt) : true;
 
+        // Check for native app mode
+        $isNativeApp = SnowflakeNativeAppDetector::isNativeApp();
+        $spcsTokenExists = file_exists('/snowflake/session/token');
+
         return response()->json([
             'configured' => !empty($config['oauth_client_id']),
             'authorized' => $hasToken,
             'expires_at' => $expiresAt,
             'is_expired' => $isExpired,
-            'needs_refresh' => $hasToken && $isExpired
+            'needs_refresh' => $hasToken && $isExpired,
+            'is_native_app' => $isNativeApp,
+            'spcs_token_available' => $spcsTokenExists
         ]);
+    }
+
+    /**
+     * Get native app environment status (no service required)
+     *
+     * GET /api/v2/_oauth/snowflake/environment
+     */
+    public function environment(Request $request)
+    {
+        $isNativeApp = SnowflakeNativeAppDetector::isNativeApp();
+        $spcsTokenPath = '/snowflake/session/token';
+        $spcsTokenExists = file_exists($spcsTokenPath);
+
+        $response = [
+            'is_native_app' => $isNativeApp,
+            'spcs_token_available' => $spcsTokenExists,
+        ];
+
+        if ($isNativeApp) {
+            $nativeConfig = SnowflakeNativeAppDetector::getNativeAppConfig();
+
+            // Return detected environment values (useful for pre-filling form)
+            $response['detected_config'] = [
+                'account' => $nativeConfig['account'] ?? null,
+                'account_locator' => $nativeConfig['account_locator'] ?? null,
+                'database' => $nativeConfig['database'] ?? null,
+                'warehouse' => $nativeConfig['warehouse'] ?? null,
+                'schema' => $nativeConfig['schema'] ?? null,
+                'role' => $nativeConfig['role'] ?? null,
+            ];
+
+            // Check SPCS token validity
+            if ($spcsTokenExists) {
+                $tokenContent = @file_get_contents($spcsTokenPath);
+                $response['token_status'] = [
+                    'available' => !empty($tokenContent),
+                    'length' => strlen($tokenContent ?? ''),
+                ];
+            }
+        }
+
+        return response()->json($response);
     }
 }
