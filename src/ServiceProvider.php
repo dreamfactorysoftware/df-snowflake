@@ -115,7 +115,6 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                     \Route::get('authorize', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeOAuthController@authorize');
                     \Route::post('refresh', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeOAuthController@refresh');
                     \Route::get('status', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeOAuthController@status');
-                    \Route::get('environment', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeOAuthController@environment');
                 });
         }
     }

@@ -413,45 +413,4 @@ class SnowflakeOAuthController extends Controller
         ]);
     }
 
-    /**
-     * Get native app environment status (no service required)
-     *
-     * GET /api/v2/_oauth/snowflake/environment
-     */
-    public function environment(Request $request)
-    {
-        $isNativeApp = SnowflakeNativeAppDetector::isNativeApp();
-        $spcsTokenPath = '/snowflake/session/token';
-        $spcsTokenExists = file_exists($spcsTokenPath);
-
-        $response = [
-            'is_native_app' => $isNativeApp,
-            'spcs_token_available' => $spcsTokenExists,
-        ];
-
-        if ($isNativeApp) {
-            $nativeConfig = SnowflakeNativeAppDetector::getNativeAppConfig();
-
-            // Return detected environment values (useful for pre-filling form)
-            $response['detected_config'] = [
-                'account' => $nativeConfig['account'] ?? null,
-                'account_locator' => $nativeConfig['account_locator'] ?? null,
-                'database' => $nativeConfig['database'] ?? null,
-                'warehouse' => $nativeConfig['warehouse'] ?? null,
-                'schema' => $nativeConfig['schema'] ?? null,
-                'role' => $nativeConfig['role'] ?? null,
-            ];
-
-            // Check SPCS token validity
-            if ($spcsTokenExists) {
-                $tokenContent = @file_get_contents($spcsTokenPath);
-                $response['token_status'] = [
-                    'available' => !empty($tokenContent),
-                    'length' => strlen($tokenContent ?? ''),
-                ];
-            }
-        }
-
-        return response()->json($response);
-    }
 }
