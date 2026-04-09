@@ -38,14 +38,17 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                 $useOdbcNested = !empty($config['config']['use_odbc']);
                 $authTop = ($config['authenticator'] ?? null) === 'oauth';
                 $authNested = ($config['config']['authenticator'] ?? null) === 'oauth';
+                // Always use ODBC when running inside SPCS (Snowpark Container Services)
+                $inSpcs = !empty(getenv('SNOWFLAKE_HOST')) && !empty(getenv('SNOWFLAKE_ACCOUNT'));
 
-                $useOdbc = $useOdbcTop || $useOdbcNested || $authTop || $authNested;
+                $useOdbc = $useOdbcTop || $useOdbcNested || $authTop || $authNested || $inSpcs;
 
                 \Log::info('Snowflake connector selection', [
                     'use_odbc_top' => $config['use_odbc'] ?? 'not set',
                     'use_odbc_nested' => $config['config']['use_odbc'] ?? 'not set',
                     'authenticator_top' => $config['authenticator'] ?? 'not set',
                     'authenticator_nested' => $config['config']['authenticator'] ?? 'not set',
+                    'in_spcs' => $inSpcs ? 'YES' : 'NO',
                     'will_use_odbc' => $useOdbc ? 'YES' : 'NO'
                 ]);
 
