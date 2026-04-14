@@ -56,6 +56,13 @@ class SnowflakeOdbcConnection extends Connection
         $this->useDefaultQueryGrammar();
         $this->useDefaultPostProcessor();
 
+        // Set database context — SPCS ODBC sessions don't have a default database
+        if (!empty($database) && is_resource($this->odbcConnection)) {
+            $quoted = '"' . str_replace('"', '""', $database) . '"';
+            @odbc_exec($this->odbcConnection, "USE DATABASE {$quoted}");
+            \Log::info('[ODBC LIFECYCLE] Set database context', ['database' => $database]);
+        }
+
         \Log::info('[ODBC LIFECYCLE] Connection constructor completed', [
             'odbcConnection_valid' => is_resource($this->odbcConnection),
             'pdo_valid' => is_resource($this->pdo),
