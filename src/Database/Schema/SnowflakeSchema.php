@@ -35,7 +35,7 @@ class SnowflakeSchema extends SqlSchema
 
         if ($isOdbc) {
             // Use INFORMATION_SCHEMA for ODBC connections
-            $sql = 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\'';
+            $sql = 'SELECT TABLE_NAME, COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_TYPE = \'BASE TABLE\'';
             if (!empty($schema)) {
                 // For ODBC, manually escape the value since quoteValue() expects PDO
                 $escapedSchema = str_replace("'", "''", $schema);
@@ -52,7 +52,8 @@ class SnowflakeSchema extends SqlSchema
                 $internalName = $schemaName . '.' . $resourceName;
                 $name = $resourceName;
                 $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
-                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $description = !empty($row['COMMENT']) ? $row['COMMENT'] : null;
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName', 'description');
                 $names[strtolower($name)] = new TableSchema($settings);
             }
         } else {
@@ -146,7 +147,7 @@ class SnowflakeSchema extends SqlSchema
 
         if ($isOdbc) {
             // Use INFORMATION_SCHEMA for ODBC connections
-            $sql = 'SELECT TABLE_NAME FROM INFORMATION_SCHEMA.VIEWS';
+            $sql = 'SELECT TABLE_NAME, COMMENT FROM INFORMATION_SCHEMA.VIEWS';
             if (!empty($schema)) {
                 $escapedSchema = str_replace("'", "''", $schema);
                 $sql .= ' WHERE TABLE_SCHEMA = \'' . $escapedSchema . '\'';
@@ -162,7 +163,9 @@ class SnowflakeSchema extends SqlSchema
                 $internalName = $schemaName . '.' . $resourceName;
                 $name = $resourceName;
                 $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);
-                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $description = !empty($row['COMMENT']) ? $row['COMMENT'] : null;
+                $isView = true;
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName', 'description', 'isView');
                 $names[strtolower($name)] = new TableSchema($settings);
             }
         } else {
@@ -183,7 +186,8 @@ class SnowflakeSchema extends SqlSchema
                 $internalName = $schemaName . '.' . $resourceName;
                 $name = $resourceName;
                 $quotedName = $this->quoteTableName($schemaName) . '.' . $this->quoteTableName($resourceName);;
-                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName');
+                $isView = true;
+                $settings = compact('schemaName', 'resourceName', 'name', 'internalName', 'quotedName', 'isView');
                 $names[strtolower($name)] = new TableSchema($settings);
             }
         }
@@ -552,6 +556,7 @@ SQL;
 
                 if (isset($column['comment']) && !empty($column['comment'])) {
                     $c->comment = $column['comment'];
+                    $c->description = $column['comment'];
                 }
 
                 // Set size/precision based on data type
@@ -606,8 +611,9 @@ SQL;
                 $c->isUnique = str_contains($column['unique key'], 'Y');
                 $c->autoIncrement = isset($column['autoincrement']) && $column['autoincrement'] !== '' ? true : false;
                 $c->dbType = $column['type'];
-                if (isset($column['comment'])) {
+                if (isset($column['comment']) && !empty($column['comment'])) {
                     $c->comment = $column['comment'];
+                    $c->description = $column['comment'];
                 }
                 $this->extractLimit($c, $c->dbType);
                 $c->fixedLength = $this->extractFixedLength($c->dbType);
@@ -625,6 +631,53 @@ SQL;
                 }
                 $table->addColumn($c);
             }
+        }
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function loadTable(TableSchema $table)
+    {
+        $this->loadTableColumns($table);
+        $this->loadTableDescription($table);
+    }
+
+    /**
+     * @inheritdoc
+     */
+    protected function loadView(TableSchema $table)
+    {
+        $this->loadTableColumns($table);
+        $this->loadTableDescription($table);
+    }
+
+    /**
+     * Loads the table or view description (COMMENT) from Snowflake metadata.
+     *
+     * @param TableSchema $table
+     */
+    protected function loadTableDescription(TableSchema $table)
+    {
+        $parts = explode('.', str_replace(['"', '`', '[', ']'], '', $table->quotedName));
+        $schemaName = count($parts) > 1 ? $parts[0] : $table->schemaName;
+        $tableName = count($parts) > 1 ? $parts[1] : $parts[0];
+
+        $escapedSchema = str_replace("'", "''", $schemaName);
+        $escapedTable = str_replace("'", "''", $tableName);
+
+        try {
+            $sql = "SELECT COMMENT FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '{$escapedSchema}' AND TABLE_NAME = '{$escapedTable}'";
+            $result = $this->connection->select($sql);
+            if (!empty($result)) {
+                $row = array_change_key_case((array)$result[0], CASE_LOWER);
+                if (!empty($row['comment'])) {
+                    $table->description = $row['comment'];
+                }
+            }
+        } catch (\Exception $e) {
+            // Non-critical — don't fail schema load over a missing comment
+            \Log::debug('Could not load table description: ' . $e->getMessage());
         }
     }
 
