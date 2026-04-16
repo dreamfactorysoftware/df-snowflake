@@ -91,33 +91,52 @@ class SnowflakeDiscoveryController extends Controller
     {
         return $this->run(function (SnowflakeOdbcConnection $conn) {
             // Sources, in priority order:
-            //   1. CURRENT_WAREHOUSE() — what the SPCS session actually has bound,
-            //      i.e. whatever the consumer admin granted via reference callback
-            //   2. SNOWFLAKE_WAREHOUSE env var — fallback if the session-level isn't set
+            //   1. dreamfactory_versioned.get_warehouse_info() — the authoritative
+            //      source; the app's own owner-rights proc wraps SYSTEM$GET_REFERENCE_WAREHOUSE
+            //      for whatever the consumer admin bound via register_warehouse_ref.
+            //   2. CURRENT_WAREHOUSE() — session-level fallback
+            //   3. SNOWFLAKE_WAREHOUSE env var — last-resort fallback
             $candidates = [];
 
+            // (1) Query the native-app reference via the app's stored proc
             try {
-                $rows = $conn->select('SELECT CURRENT_WAREHOUSE() AS WH');
-                $current = null;
+                $rows = $conn->select('CALL dreamfactory_versioned.get_warehouse_info()');
                 foreach ($rows as $row) {
-                    $assoc = (array) $row;
-                    foreach ($assoc as $k => $v) {
-                        if (strtolower($k) === 'wh' && !empty($v)) {
-                            $current = $v;
-                            break 2;
+                    foreach ((array) $row as $v) {
+                        if (is_string($v) && preg_match('/^Referenced warehouse:\s*(.+)$/', $v, $m)) {
+                            $name = trim($m[1]);
+                            if ($name !== '') {
+                                $candidates[$name] = true;
+                            }
                         }
                     }
                 }
-                if (!empty($current)) {
-                    $candidates[$current] = true;
-                }
             } catch (\Throwable $e) {
-                \Log::warning('CURRENT_WAREHOUSE() failed', ['message' => $e->getMessage()]);
+                \Log::warning('get_warehouse_info call failed', ['message' => $e->getMessage()]);
             }
 
-            $config = SnowflakeNativeAppDetector::getNativeAppConfig();
-            if (!empty($config['warehouse'])) {
-                $candidates[$config['warehouse']] = true;
+            // (2) CURRENT_WAREHOUSE() fallback
+            if (empty($candidates)) {
+                try {
+                    $rows = $conn->select('SELECT CURRENT_WAREHOUSE() AS WH');
+                    foreach ($rows as $row) {
+                        foreach ((array) $row as $k => $v) {
+                            if (strtolower($k) === 'wh' && !empty($v)) {
+                                $candidates[$v] = true;
+                            }
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    \Log::warning('CURRENT_WAREHOUSE() failed', ['message' => $e->getMessage()]);
+                }
+            }
+
+            // (3) env var fallback
+            if (empty($candidates)) {
+                $config = SnowflakeNativeAppDetector::getNativeAppConfig();
+                if (!empty($config['warehouse'])) {
+                    $candidates[$config['warehouse']] = true;
+                }
             }
 
             return array_map(function ($name) {
