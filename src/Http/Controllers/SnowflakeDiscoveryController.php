@@ -89,36 +89,46 @@ class SnowflakeDiscoveryController extends Controller
      */
     public function warehouses(Request $request)
     {
-        try {
-            if (!SnowflakeNativeAppDetector::isNativeApp()) {
-                return response()->json([
-                    'error' => 'Discovery endpoints require the Snowflake Native App environment.',
-                ], 503);
+        return $this->run(function (SnowflakeOdbcConnection $conn) {
+            // Sources, in priority order:
+            //   1. CURRENT_WAREHOUSE() — what the SPCS session actually has bound,
+            //      i.e. whatever the consumer admin granted via reference callback
+            //   2. SNOWFLAKE_WAREHOUSE env var — fallback if the session-level isn't set
+            $candidates = [];
+
+            try {
+                $rows = $conn->select('SELECT CURRENT_WAREHOUSE() AS WH');
+                $current = null;
+                foreach ($rows as $row) {
+                    $assoc = (array) $row;
+                    foreach ($assoc as $k => $v) {
+                        if (strtolower($k) === 'wh' && !empty($v)) {
+                            $current = $v;
+                            break 2;
+                        }
+                    }
+                }
+                if (!empty($current)) {
+                    $candidates[$current] = true;
+                }
+            } catch (\Throwable $e) {
+                \Log::warning('CURRENT_WAREHOUSE() failed', ['message' => $e->getMessage()]);
             }
 
             $config = SnowflakeNativeAppDetector::getNativeAppConfig();
-            $warehouse = $config['warehouse'] ?? null;
+            if (!empty($config['warehouse'])) {
+                $candidates[$config['warehouse']] = true;
+            }
 
-            $resource = [];
-            if (!empty($warehouse)) {
-                $resource[] = [
-                    'name'  => $warehouse,
+            return array_map(function ($name) {
+                return [
+                    'name'  => $name,
                     'state' => null,
                     'size'  => null,
                     'type'  => null,
                 ];
-            }
-
-            return response()->json(['resource' => $resource]);
-        } catch (\Throwable $e) {
-            \Log::error('Snowflake warehouse discovery failed', [
-                'message' => $e->getMessage(),
-            ]);
-            return response()->json([
-                'error'   => 'Warehouse discovery failed',
-                'message' => $e->getMessage(),
-            ], 500);
-        }
+            }, array_keys($candidates));
+        });
     }
 
     /**
