@@ -119,6 +119,16 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
                     \Route::post('refresh', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeOAuthController@refresh');
                     \Route::get('status', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeOAuthController@status');
                 });
+
+            // Discovery endpoints — populate the admin-UI picker from the app's own SPCS identity.
+            // No service_id required; these run before a DF service is created.
+            \Route::prefix('api/v2/_snowflake/discover')
+                ->group(function () {
+                    \Route::get('databases', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeDiscoveryController@databases');
+                    \Route::get('schemas', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeDiscoveryController@schemas');
+                    \Route::get('warehouses', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeDiscoveryController@warehouses');
+                    \Route::get('roles', 'DreamFactory\Core\Snowflake\Http\Controllers\SnowflakeDiscoveryController@roles');
+                });
         }
     }
 
