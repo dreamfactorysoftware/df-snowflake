@@ -79,21 +79,46 @@ class SnowflakeDiscoveryController extends Controller
     /**
      * GET /api/v2/_snowflake/discover/warehouses
      *
-     * Returns warehouses the native app's role can use.
+     * Returns the native app's assigned warehouse. In the native-app context
+     * this is fixed by the consumer admin at install time via the warehouse
+     * reference callback (surfaced as SNOWFLAKE_WAREHOUSE in the container env).
+     *
+     * We deliberately do NOT run `SHOW WAREHOUSES` — the Snowflake ODBC driver
+     * has a pre-allocation bug that can OOM the PHP process on account-wide
+     * SHOW results. The app realistically only ever uses one warehouse anyway.
      */
     public function warehouses(Request $request)
     {
-        return $this->run(function (SnowflakeOdbcConnection $conn) {
-            $rows = $this->showRows($conn, 'SHOW WAREHOUSES');
-            return array_map(function ($row) {
-                return [
-                    'name'  => $this->pick($row, 'name'),
-                    'state' => $this->pick($row, 'state'),
-                    'size'  => $this->pick($row, 'size'),
-                    'type'  => $this->pick($row, 'type'),
+        try {
+            if (!SnowflakeNativeAppDetector::isNativeApp()) {
+                return response()->json([
+                    'error' => 'Discovery endpoints require the Snowflake Native App environment.',
+                ], 503);
+            }
+
+            $config = SnowflakeNativeAppDetector::getNativeAppConfig();
+            $warehouse = $config['warehouse'] ?? null;
+
+            $resource = [];
+            if (!empty($warehouse)) {
+                $resource[] = [
+                    'name'  => $warehouse,
+                    'state' => null,
+                    'size'  => null,
+                    'type'  => null,
                 ];
-            }, $rows);
-        });
+            }
+
+            return response()->json(['resource' => $resource]);
+        } catch (\Throwable $e) {
+            \Log::error('Snowflake warehouse discovery failed', [
+                'message' => $e->getMessage(),
+            ]);
+            return response()->json([
+                'error'   => 'Warehouse discovery failed',
+                'message' => $e->getMessage(),
+            ], 500);
+        }
     }
 
     /**
