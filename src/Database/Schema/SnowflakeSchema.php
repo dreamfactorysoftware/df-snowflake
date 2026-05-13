@@ -263,18 +263,30 @@ SQL;
             $dbNamePrefix = $this->quoteTableName($holder->databaseName) . '.';
         }
  
+        // Both {$type} columns and the dbNamePrefix come from non-caller
+        // sources (the holder is hydrated from a prior schema query). The
+        // routine name and schema, however, originate from caller-supplied
+        // route parameters, so they must be parameterized.
         $sql = <<<MYSQL
-SELECT * FROM {$dbNamePrefix}INFORMATION_SCHEMA.{$type}S WHERE {$type}_NAME = '{$holder->resourceName}' AND {$type}_SCHEMA = '{$holder->schemaName}'
+SELECT * FROM {$dbNamePrefix}INFORMATION_SCHEMA.{$type}S WHERE {$type}_NAME = :name AND {$type}_SCHEMA = :schema
 MYSQL;
 
-        $bindings = [':object' => $type, ':schema' => $holder->schemaName];
- 
+        $bindings = [
+            ':name'   => $holder->resourceName,
+            ':schema' => $holder->schemaName,
+        ];
+
         $rows = $this->connection->select($sql, $bindings);
         foreach ($rows as $row) {
             $row = array_change_key_case((array)$row, CASE_UPPER);
-            $argumentSignature = str_replace(['(', ')'], '"', Arr::get($row, 'ARGUMENT_SIGNATURE'));
-            $arguments = [];
-            eval('$arguments = explode( ", ", ' . $argumentSignature . ');');
+            // Snowflake ARGUMENT_SIGNATURE is shaped like "(VARCHAR, INT)";
+            // strip parens and split on comma. Previous code used eval() on
+            // the str_replace'd string — full RCE if a routine author could
+            // smuggle PHP syntax into ARGUMENT_SIGNATURE.
+            $argumentSignature = trim((string) Arr::get($row, 'ARGUMENT_SIGNATURE'), '()');
+            $arguments = $argumentSignature === ''
+                ? []
+                : array_map('trim', explode(',', $argumentSignature));
             foreach ($arguments as $key => $value) {
                 $pos = intval($key + 1);
                 // parse ARGUMENT_SIGNATURE
