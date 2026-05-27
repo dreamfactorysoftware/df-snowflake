@@ -104,7 +104,7 @@ class SnowflakeConnection extends Connection
      */
     protected function getDefaultQueryGrammar()
     {
-        return new SnowflakeGrammar;
+        return new SnowflakeGrammar($this);
     }
 
     /**
@@ -124,7 +124,7 @@ class SnowflakeConnection extends Connection
      */
     protected function getDefaultSchemaGrammar()
     {
-        return $this->withTablePrefix(new SchemaGrammar());
+        return new SchemaGrammar($this);
     }
 
     /**
