@@ -104,18 +104,16 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
     public static function getConfigSchema()
     {
         $schema = parent::getConfigSchema();
-        $cacheTtl = array_pop($schema);
-        $cacheEnabled = array_pop($schema);
-        $maxRecords = array_pop($schema);
-        $upserts = array_pop($schema);
-        array_pop($schema);                 // Remove statement
-        array_pop($schema);                 // Remove attributes
-        array_pop($schema);                 // Remove options
-        array_push($schema, $upserts);      // Restore upsert
-        array_push($schema, $maxRecords);   // Restore max_records
-        array_push($schema, $cacheEnabled); // Restore cache enabled
-        array_push($schema, $cacheTtl);     // Restore cache TTL
 
-        return $schema;
+        // Snowflake's pdo_snowflake driver doesn't honor PDO driver options or
+        // post-connect attributes, so drop those two fields. Keep `statements`
+        // so admins can issue session parameters on connect (e.g.
+        // `ALTER SESSION SET TIMEZONE = 'UTC'`, QUERY_TIMEOUT,
+        // ROWS_PER_RESULTSET) — the base SqlDb service already runs them via
+        // initStatements(). Name-based filter so base field-order changes can't
+        // silently strip the wrong field, as the old positional array_pop did.
+        return array_values(array_filter($schema, function ($field) {
+            return !in_array($field['name'] ?? null, ['options', 'attributes'], true);
+        }));
     }
 }
