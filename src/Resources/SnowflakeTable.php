@@ -263,12 +263,4 @@ class SnowflakeTable extends Table
         // This could be SQL injection attempt or unsupported filter arrangement
         throw new BadRequestException('Invalid or unparsable filter request.');
     }
-
-    /**
-     * {@inheritdoc}
-     */
-    protected function rollbackTransaction()
-    {
-        // TODO: Implement rollbackTransaction() method.
-    }
 }
