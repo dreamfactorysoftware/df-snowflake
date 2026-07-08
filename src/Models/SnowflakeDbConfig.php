@@ -223,9 +223,12 @@ class SnowflakeDbConfig extends BaseSqlDbConfig
                 $out[] = $temp;
             }
 
-            // Remove options, attributes, and statements (Snowflake doesn't use these)
+            // Snowflake's pdo_snowflake driver doesn't honor PDO driver options or
+            // post-connect attributes, so drop those two. Keep `statements` so admins
+            // can set session parameters on connect (e.g. ALTER SESSION SET TIMEZONE),
+            // which the base SqlDb service runs via initStatements().
             $out = array_filter($out, function($field) {
-                return !in_array($field['name'], ['options', 'attributes', 'statements']);
+                return !in_array($field['name'], ['options', 'attributes']);
             });
 
             // Add allow upsert here

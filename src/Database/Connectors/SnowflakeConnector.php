@@ -24,7 +24,37 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
         $dsn = $this->getDsn($config);
         $connection = $this->createConnection($dsn, $config, $options);
 
+        $this->applyQueryTag($connection, $config);
+
         return $connection;
+    }
+
+    /**
+     * Tag the Snowflake session so query cost/usage can be attributed to this
+     * DreamFactory service in ACCOUNT_USAGE.QUERY_HISTORY. Best-effort: a
+     * tagging failure must never break an otherwise-healthy connection.
+     *
+     * @param \PDO  $pdo
+     * @param array $config
+     * @return void
+     */
+    protected function applyQueryTag($pdo, array $config)
+    {
+        try {
+            $tag = array_filter([
+                'app'       => 'dreamfactory',
+                'service'   => $config['name'] ?? null,
+                'database'  => $config['database'] ?? null,
+                'schema'    => $config['schema'] ?? null,
+                'warehouse' => $config['warehouse'] ?? null,
+            ], fn ($v) => $v !== null && $v !== '');
+
+            // Snowflake string literals quote single-quotes by doubling them.
+            $json = str_replace("'", "''", json_encode($tag));
+            $pdo->exec("ALTER SESSION SET QUERY_TAG = '{$json}'");
+        } catch (\PDOException $e) {
+            \Log::warning('Snowflake QUERY_TAG could not be set: ' . $e->getMessage());
+        }
     }
 
     public function createConnection($dsn, array $config, array $options)
@@ -33,8 +63,16 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             $config['username'] ?? null, $config['password'] ?? null,
         ];
 
+        // The config UI can leave password as "" (not null) when key-pair auth
+        // is selected. Normalize an empty password to null so the branch below
+        // chooses key-pair auth when a key is present, instead of falling
+        // through to password auth with an empty password.
+        if ($password === '') {
+            $password = null;
+        }
+
         try {
-            if ($password === null && $config['key'] !== null) {
+            if ($password === null && !empty($config['key'])) {
                 return $this->createConnectionWithKeyPairAuth(
                     $dsn, $username, $config, $options
                 );
@@ -155,11 +193,11 @@ class SnowflakeConnector extends Connector implements ConnectorInterface
             $dsn .= "database={$database};";
         }
 
-        if (!empty($schema)) {
-            $dsn .= "schema={$schema};";
-        } else {
-            throw new \InvalidArgumentException("Schema not given, required.");
-        }
+        // Schema is required in the Snowflake DSN. Default to PUBLIC (Snowflake's
+        // own default schema) when the admin leaves it blank — matches the config
+        // field hint ("Leave blank to work with the default schema") instead of
+        // throwing on an otherwise-valid connection.
+        $dsn .= "schema=" . (!empty($schema) ? $schema : 'PUBLIC') . ";";
 
         if (!empty($warehouse)) {
             $dsn .= "warehouse={$warehouse};";

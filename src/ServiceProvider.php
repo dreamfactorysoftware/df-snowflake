@@ -158,8 +158,9 @@ class ServiceProvider extends \Illuminate\Support\ServiceProvider
         $this->substituteConfig('warehouse', 'url', $config);
         $this->substituteConfig('username', 'url', $config);
         $this->substituteConfig('password', 'url', $config);
-        $this->substituteConfig('key', 'header', $config);
-        $this->substituteConfig('passcode', 'header', $config);
+        // key/passcode are intentionally NOT overridable via URL query params —
+        // key material must not land in URLs (logs, history, referrers). They
+        // are still overridable via headers; checkHeaders() handles that.
         $this->substituteConfig('role', 'url', $config);
     }
 
