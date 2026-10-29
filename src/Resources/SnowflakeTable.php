@@ -139,8 +139,11 @@ class SnowflakeTable extends Table
             return null;
         }
 
-        // Accept a='x' OR b='y' as well as (a='x') OR (b='y') (df-core#172).
-        $filter = DbLogicalOperators::wrapBareConditions(trim($filter));
+        $filter = trim($filter);
+        // Accept a='x' OR b='y' as well as (a='x') OR (b='y') (df-core#172); helper needs df-core >= #177.
+        if (method_exists(DbLogicalOperators::class, 'wrapBareConditions')) {
+            $filter = DbLogicalOperators::wrapBareConditions($filter);
+        }
         // todo use smarter regex
         // handle logical operators first
         $logicalOperators = DbLogicalOperators::getDefinedConstants();

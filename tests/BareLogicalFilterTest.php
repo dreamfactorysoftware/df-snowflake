@@ -2,6 +2,7 @@
 
 namespace DreamFactory\Core\Snowflake\Tests;
 
+use DreamFactory\Core\Enums\DbLogicalOperators;
 use DreamFactory\Core\Snowflake\Resources\SnowflakeTable;
 use DreamFactory\Core\Database\Schema\ColumnSchema;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -15,7 +16,7 @@ use ReflectionClass;
  * and the query silently matched the wrong rows.
  *
  * Drives parseFilterString() directly (IS NULL / IS NOT NULL need no value
- * parsing, so no BigQuery connection).
+ * parsing, so no Snowflake connection).
  */
 class BareLogicalFilterTest extends TestCase
 {
@@ -67,10 +68,25 @@ class BareLogicalFilterTest extends TestCase
     #[DataProvider('cases')]
     public function testBareConditionsParseLikeParenthesized(string $bare): void
     {
+        if (!method_exists(DbLogicalOperators::class, 'wrapBareConditions')) {
+            $this->markTestSkipped('needs df-core#177');
+        }
         $parenthesized = $this->parenthesize($bare);
         $expected = $this->parseFilter($parenthesized);
         $this->assertStringContainsString('"b"', $expected, 'sanity: both fields present in parenthesized form');
         $this->assertSame($expected, $this->parseFilter($bare));
+    }
+
+    /**
+     * A parenthesized filter must parse on any df-core, including ones that
+     * predate DbLogicalOperators::wrapBareConditions().
+     */
+    public function testParenthesizedFilterParsesOnAnyCore(): void
+    {
+        $sql = $this->parseFilter('(a is null) OR (b is null)');
+        $this->assertStringContainsString('"a"', $sql);
+        $this->assertStringContainsString('"b"', $sql);
+        $this->assertStringContainsString('OR', $sql);
     }
 
     private function parenthesize(string $bare): string
